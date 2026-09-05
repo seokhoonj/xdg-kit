@@ -11,8 +11,8 @@ way, on every OS.
 
 - **Directories** follow the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/)
   (`config` / `data` / `state` / `cache` / `runtime`), using the `~/.config` layout on
-  every platform — the convention git, ssh, and aws already follow — so paths are
-  identical across machines and no platform library is needed.
+  every platform — the same convention git follows — so paths are identical across
+  machines and no platform library is needed.
 - **Secrets** resolve in a fixed order — an explicit value, then the environment, then a
   shared store, then the app's own store — so a key common to several apps can live in
   **one** place instead of being copied into each.
@@ -62,18 +62,18 @@ from xdgkit import Credentials, secret, require, set_secret, unset_secret, secre
 
 # Resolution order: override > environment > shared stores > this app's store.
 creds = Credentials("myapp", shared=["auth"])
-key = creds.require("API_KEY")          # env $API_KEY, then auth's store, then myapp's; raises if unset
-maybe = creds.secret("API_KEY")         # same, but returns None instead of raising
-creds.set("API_KEY", value="sk-...")    # writes myapp's own store (value is keyword-only)
-creds.unset("API_KEY")
-creds.names()                           # ["API_KEY", ...] -- names only, never values
+key = creds.require("API_KEY")         # env $API_KEY, then auth's store, then myapp's; raises if unset
+maybe = creds.secret("API_KEY")        # same, but returns None instead of raising
+creds.set("API_KEY", value="sk-...")   # writes myapp's own store (value is keyword-only)
+creds.unset("API_KEY")                 # removes it from myapp's store (no-op if absent)
+creds.names()                          # ["API_KEY", ...] -- names only, never values
 
 # One-shot module-level convenience (each constructs a Credentials internally):
 secret("myapp", "API_KEY")                       # -> str | None
-require("myapp", "API_KEY")                       # -> str, raises CredentialsError if unset
+require("myapp", "API_KEY")                      # -> str, raises CredentialsError if unset
 set_secret("myapp", "API_KEY", value="sk-...")   # value is keyword-only
-unset_secret("myapp", "API_KEY")
-secret_names("myapp")                             # -> list[str]
+unset_secret("myapp", "API_KEY")                 # remove from this app's store (no-op if absent)
+secret_names("myapp")                            # -> list[str]
 ```
 
 The **shared store** is how a key common to several apps stops being duplicated: store it

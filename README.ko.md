@@ -10,7 +10,7 @@
 
 - **디렉터리**는 [XDG Base Directory 명세](https://specifications.freedesktop.org/basedir/latest/)
   (`config` / `data` / `state` / `cache` / `runtime`)를 따르며, 모든 플랫폼에서 `~/.config`
-  레이아웃을 사용합니다 — git, ssh, aws가 이미 따르는 관례라 머신마다 경로가 동일하고
+  레이아웃을 사용합니다 — git이 이미 따르는 것과 같은 관례라 머신마다 경로가 동일하고
   별도의 플랫폼 라이브러리가 필요 없습니다.
 - **시크릿**은 정해진 순서로 해석됩니다 — 명시적 값, 그다음 환경변수, 그다음 공유
   스토어, 마지막으로 앱 자신의 스토어 — 그래서 여러 앱이 공통으로 쓰는 키를 각 앱에
@@ -62,18 +62,18 @@ from xdgkit import Credentials, secret, require, set_secret, unset_secret, secre
 
 # 해석 순서: override > 환경변수 > 공유 스토어 > 이 앱의 스토어.
 creds = Credentials("myapp", shared=["auth"])
-key = creds.require("API_KEY")          # $API_KEY, 그다음 auth 스토어, 그다음 myapp 스토어; 없으면 예외
-maybe = creds.secret("API_KEY")         # 같은 해석, 단 없으면 예외 대신 None 반환
-creds.set("API_KEY", value="sk-...")    # myapp 자신의 스토어에 기록 (value는 키워드 전용)
-creds.unset("API_KEY")
-creds.names()                           # ["API_KEY", ...] -- 이름만, 값은 절대 반환하지 않음
+key = creds.require("API_KEY")         # $API_KEY, 그다음 auth 스토어, 그다음 myapp 스토어; 없으면 예외
+maybe = creds.secret("API_KEY")        # 같은 해석, 단 없으면 예외 대신 None 반환
+creds.set("API_KEY", value="sk-...")   # myapp 자신의 스토어에 기록 (value는 키워드 전용)
+creds.unset("API_KEY")                 # myapp 스토어에서 삭제 (없으면 무시)
+creds.names()                          # ["API_KEY", ...] -- 이름만, 값은 절대 반환하지 않음
 
 # 모듈 수준 원샷 편의 함수 (각각 내부에서 Credentials를 구성):
 secret("myapp", "API_KEY")                       # -> str | None
-require("myapp", "API_KEY")                       # -> str, 없으면 CredentialsError
+require("myapp", "API_KEY")                      # -> str, 없으면 CredentialsError
 set_secret("myapp", "API_KEY", value="sk-...")   # value는 키워드 전용
-unset_secret("myapp", "API_KEY")
-secret_names("myapp")                             # -> list[str]
+unset_secret("myapp", "API_KEY")                 # 이 앱의 스토어에서 삭제 (없으면 무시)
+secret_names("myapp")                            # -> list[str]
 ```
 
 **공유 스토어**는 여러 앱이 공통으로 쓰는 키의 중복을 없애는 방법입니다. 공유 앱(예:
