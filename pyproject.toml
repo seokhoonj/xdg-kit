@@ -76,5 +76,5 @@ ignore_missing_imports = true
 # the host's own (fcntl vs msvcrt). Both branches need an ignore and one is always
 # unused, so type-checking on either OS means not warning here.
 [[tool.mypy.overrides]]
-module = ["xdgkit.locking"]
+module = ["xdgkit._oslock"]
 warn_unused_ignores = false
