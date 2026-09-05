@@ -18,6 +18,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from xdgkit import __version__
 from xdgkit.backends import FileBackend, default_backend
 from xdgkit.credentials import Credentials
 from xdgkit.errors import InvalidAppNameError, XdgkitError
@@ -46,6 +47,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xdgkit", description=__doc__)
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"xdgkit {__version__}",
+        help="print the installed version and exit",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_set = sub.add_parser("set", help="store a secret (prompted without echo if omitted)")

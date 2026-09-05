@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from xdgkit import __version__
 from xdgkit.backends import FileBackend
 from xdgkit.cli import main
 
@@ -10,6 +13,15 @@ def test_set_with_value_stores(capsys):
     assert main(["set", "nw", "K", "--value", "sk-abcdef"]) == 0
     assert FileBackend().get("nw", "K") == "sk-abcdef"
     assert "stored K for nw" in capsys.readouterr().out
+
+
+def test_version_flag_prints_and_exits_zero(capsys):
+    """`xdgkit --version` prints the version at the top level and exits 0 -- not shoved
+    behind a required subcommand (argparse's version action raises SystemExit)."""
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == f"xdgkit {__version__}"
 
 
 def test_set_empty_value_is_refused(capsys):
