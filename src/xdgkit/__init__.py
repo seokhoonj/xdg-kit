@@ -15,6 +15,8 @@ Deeper pieces stay in their modules so the import says what it reaches for:
 
 from __future__ import annotations
 
+from importlib.metadata import version
+
 from xdgkit.credentials import (
     Credentials,
     require,
@@ -32,7 +34,11 @@ from xdgkit.errors import (
 from xdgkit.paths import cache_dir, config_dir, data_dir, state_dir
 from xdgkit.runtime import runtime_dir
 
-__version__ = "0.1.0"
+# Single source of truth is pyproject's version, read from the installed distribution's
+# metadata -- so a release bump lives in one place and `xdgkit --version` can never drift
+# from what pip resolved. (An editable install reflects a bump after re-sync; importing
+# from an uninstalled source tree raises PackageNotFoundError, which is not a supported use.)
+__version__ = version("xdgkit")
 
 __all__ = [
     "__version__",
