@@ -24,6 +24,24 @@ def test_version_flag_prints_and_exits_zero(capsys):
     assert capsys.readouterr().out.strip() == f"xdgkit {__version__}"
 
 
+def test_version_wins_over_trailing_subcommand(capsys):
+    """--version short-circuits before the required-subcommand check, so it still prints
+    and exits 0 even with a subcommand after it."""
+    with pytest.raises(SystemExit) as exc:
+        main(["--version", "set"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == f"xdgkit {__version__}"
+
+
+def test_no_arguments_exits_with_usage_error(capsys):
+    """With no subcommand argparse raises SystemExit(2) and writes usage to stderr -- a
+    usage error, not a returned code (main's except clauses catch XdgkitError, not this)."""
+    with pytest.raises(SystemExit) as exc:
+        main([])
+    assert exc.value.code == 2
+    assert "usage:" in capsys.readouterr().err
+
+
 def test_set_empty_value_is_refused(capsys):
     assert main(["set", "nw", "K", "--value", ""]) == 1
     assert "empty value" in capsys.readouterr().err

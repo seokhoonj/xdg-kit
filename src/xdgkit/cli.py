@@ -30,7 +30,8 @@ from xdgkit.runtime import runtime_dir
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for the ``xdgkit`` console script. Returns a process exit code:
     0 on success, 1 on an ``XdgkitError`` (reported as a one-line message, not a
-    traceback), 2 on a usage error (from argparse)."""
+    traceback), 2 on a usage error (from argparse). ``--version`` (and ``-h``) do not
+    return -- argparse prints and raises ``SystemExit(0)`` from ``parse_args``."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:

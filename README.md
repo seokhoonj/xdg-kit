@@ -27,6 +27,12 @@ pip install xdgkit            # file store, zero runtime dependencies
 pip install "xdgkit[keyring]" # add the optional OS keyring backend
 ```
 
+Check it worked:
+
+```sh
+xdgkit --version
+```
+
 Requires Python 3.11+.
 
 ## Directories
