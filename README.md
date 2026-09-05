@@ -1,3 +1,5 @@
+**English** | [한국어](README.ko.md)
+
 # xdgkit
 
 Secure XDG-style application storage for Python: paths, credentials, permissions, and
