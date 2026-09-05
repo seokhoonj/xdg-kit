@@ -1,0 +1,80 @@
+[build-system]
+requires      = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name            = "xdgkit"
+version         = "0.1.0"
+description     = "Secure XDG-style application storage for Python: paths, credentials, permissions, and runtime files."
+readme          = "README.md"
+license         = "MIT"
+license-files   = ["LICENSE"]
+authors         = [{ name = "seokhoonj", email = "seokhoonj@gmail.com" }]
+keywords        = ["xdg", "config", "credentials", "keyring", "paths", "runtime", "appdirs"]
+classifiers     = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Security",
+]
+requires-python = ">=3.11"
+dependencies    = []
+
+[project.urls]
+Homepage   = "https://github.com/seokhoonj/xdgkit"
+Repository = "https://github.com/seokhoonj/xdgkit"
+Issues     = "https://github.com/seokhoonj/xdgkit/issues"
+
+[project.optional-dependencies]
+keyring = ["keyring>=24"]
+dev = [
+    "keyring>=24",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+xdgkit = "xdgkit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xdgkit"]
+
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
+
+# keyring is an optional dependency and ships no type stubs; the backend that uses it
+# guards every import, so type-checking without it installed must not error here.
+[[tool.mypy.overrides]]
+module = ["keyring", "keyring.errors"]
+ignore_missing_imports = true
+
+# This module carries a POSIX branch and a Windows branch, and typeshed only reveals
+# the host's own (fcntl vs msvcrt). Both branches need an ignore and one is always
+# unused, so type-checking on either OS means not warning here.
+[[tool.mypy.overrides]]
+module = ["xdgkit.locking"]
+warn_unused_ignores = false
