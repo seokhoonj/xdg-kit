@@ -25,9 +25,13 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import IO, Protocol
 
+from xdgkit._oslock import lock_exclusive, unlock
 from xdgkit.atomic import write_text_atomic
 from xdgkit.errors import CredentialsError, XdgkitError
 from xdgkit.paths import config_dir
@@ -83,28 +87,31 @@ class FileBackend:
 
     def set(self, app: str, name: str, *, value: str) -> None:
         """Store ``value`` under ``name``, creating or updating the file at mode 0600 in a
-        0700 directory.
+        0700 directory. The whole read-modify-write is serialized so concurrent writers to
+        one store never lose each other's keys.
 
         Raises:
             CredentialsError: the existing file is unreadable or malformed, or the write
                 failed.
         """
-        secret_value_by_name = self._load(app)
-        secret_value_by_name[name] = value
-        self._save(app, secret_value_by_name)
+        with _exclusive_store_lock(self.path(app)):
+            secret_value_by_name = self._load(app)
+            secret_value_by_name[name] = value
+            self._save(app, secret_value_by_name)
 
     def unset(self, app: str, name: str) -> None:
         """Remove ``name`` from the file if present; a no-op when the file or key is
-        absent.
+        absent. The read-modify-write is serialized (see ``set``).
 
         Raises:
             CredentialsError: the existing file is unreadable or malformed, or the write
                 failed.
         """
-        secret_value_by_name = self._load(app)
-        if name in secret_value_by_name:
-            del secret_value_by_name[name]
-            self._save(app, secret_value_by_name)
+        with _exclusive_store_lock(self.path(app)):
+            secret_value_by_name = self._load(app)
+            if name in secret_value_by_name:
+                del secret_value_by_name[name]
+                self._save(app, secret_value_by_name)
 
     def names(self, app: str) -> list[str]:
         """The stored key names, sorted -- never the values.
@@ -146,6 +153,57 @@ class FileBackend:
             write_text_atomic(path, text, mode=PRIVATE_FILE_MODE)
         except XdgkitError as err:
             raise CredentialsError(str(err)) from err
+
+
+# --- store write serialization ------------------------------------------------
+#
+# A file store's set/unset is a read-modify-write: load the JSON, change one key, write it
+# back. The atomic write guards against a *torn* file, not against a lost *update* -- two
+# writers that both read the old map each write back their own change, and the last one wins,
+# silently dropping the other's key. So the whole critical section is held under a lock that
+# serializes across both threads (a per-path threading.Lock) and processes (a blocking OS
+# lock on a sibling .lock file, which -- unlike credentials.json -- is never replaced, so an
+# atomic rename cannot orphan a holder's lock).
+
+_store_thread_locks: dict[str, threading.Lock] = {}
+_store_thread_locks_guard = threading.Lock()
+
+
+def _thread_lock_for(key: str) -> threading.Lock:
+    """The process-wide lock for the store at ``key``, created on first use. Serializes two
+    threads of one process, which an OS file lock alone does not guarantee everywhere."""
+    with _store_thread_locks_guard:
+        lock = _store_thread_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _store_thread_locks[key] = lock
+        return lock
+
+
+@contextmanager
+def _exclusive_store_lock(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock over a read-modify-write of the store file ``path``. Degrades
+    to thread-only serialization where no OS lock primitive exists or the lock file cannot
+    be created -- the in-process guarantee still holds, and single-process use is the norm."""
+    thread_lock = _thread_lock_for(str(path))
+    thread_lock.acquire()
+    handle: IO[str] | None = None
+    try:
+        try:
+            restrict_dir_to_owner(path.parent)
+            handle = (path.parent / f"{path.name}.lock").open("a+")
+        except OSError:
+            handle = None   # cannot create the lock file: rely on the thread lock alone
+        if handle is not None:
+            lock_exclusive(handle, blocking=True)   # wait, don't race, for a store write
+        yield
+    finally:
+        if handle is not None:
+            try:
+                unlock(handle)
+            finally:
+                handle.close()
+        thread_lock.release()
 
 
 class KeyringBackend:

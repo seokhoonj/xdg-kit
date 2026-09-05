@@ -80,6 +80,35 @@ def test_file_non_object_json_raises():
         fb.get("nw", "K")
 
 
+def test_file_concurrent_set_no_lost_update():
+    """Concurrent set() of distinct keys into the same store must not lose updates: the
+    load->modify->save critical section is serialized, so every writer's key survives.
+    Without a lock, all writers read the same empty snapshot and overwrite one another,
+    leaving only one key."""
+    import threading
+
+    fb = FileBackend()
+    n = 50
+    start = threading.Barrier(n)   # release all writers at once to force overlap
+    errors: list[BaseException] = []
+
+    def worker(i: int) -> None:
+        try:
+            start.wait()
+            fb.set("nw", f"KEY_{i:03d}", value=f"v{i}")
+        except BaseException as err:   # pragma: no cover - surfaced via the assert below
+            errors.append(err)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    assert fb.names("nw") == [f"KEY_{i:03d}" for i in range(n)]
+
+
 def test_file_set_write_failure_raises_credentials_error(monkeypatch):
     """The atomic layer raises XdgkitError; FileBackend.set must honour its documented
     CredentialsError contract by converting it."""
