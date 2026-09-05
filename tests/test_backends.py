@@ -107,6 +107,83 @@ def test_file_concurrent_set_no_lost_update():
 
     assert not errors
     assert fb.names("nw") == [f"KEY_{i:03d}" for i in range(n)]
+    for i in range(n):
+        assert fb.get("nw", f"KEY_{i:03d}") == f"v{i}"   # each key kept its own value
+
+
+def _process_set_worker(key: str, value: str) -> None:
+    """Set one key in the shared store from a separate process -- so the sibling ``.lock``
+    OS lock, not the per-process thread lock, is what serializes the read-modify-write."""
+    from xdgkit.backends import FileBackend
+
+    FileBackend().set("nw", key, value=value)
+
+
+@posix_only
+def test_file_concurrent_process_set_no_lost_update():
+    """Distinct keys set by separate PROCESSES must all survive. The thread-only test cannot
+    reach this path: its threading.Lock serializes before the OS lock is ever contended, so
+    only a cross-process run actually exercises the flock serialization the fix relies on."""
+    import multiprocessing as mp
+
+    n = 20
+    ctx = mp.get_context("fork")   # fork so children inherit the test's XDG_CONFIG_HOME
+    procs = [
+        ctx.Process(target=_process_set_worker, args=(f"KEY_{i:03d}", f"v{i}"))
+        for i in range(n)
+    ]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(timeout=30)
+    for p in procs:
+        if p.is_alive():
+            p.terminate()   # never orphan a hung child still holding the flock
+            p.join()
+
+    assert all(p.exitcode == 0 for p in procs)
+    fb = FileBackend()
+    assert fb.names("nw") == [f"KEY_{i:03d}" for i in range(n)]
+    for i in range(n):
+        assert fb.get("nw", f"KEY_{i:03d}") == f"v{i}"
+
+
+def test_file_concurrent_set_and_unset_keeps_expected_keys():
+    """The same lock governs unset: concurrently setting new keys while unsetting seeded ones
+    must leave exactly the surviving set -- no set clobbering a delete or vice versa."""
+    import threading
+
+    fb = FileBackend()
+    n = 30
+    for i in range(n):
+        fb.set("nw", f"OLD_{i:03d}", value=f"o{i}")   # seed keys the deleters will remove
+
+    start = threading.Barrier(2 * n)
+    errors: list[BaseException] = []
+
+    def setter(i: int) -> None:
+        try:
+            start.wait()
+            fb.set("nw", f"NEW_{i:03d}", value=f"n{i}")
+        except BaseException as err:   # pragma: no cover - surfaced via the assert below
+            errors.append(err)
+
+    def unsetter(i: int) -> None:
+        try:
+            start.wait()
+            fb.unset("nw", f"OLD_{i:03d}")
+        except BaseException as err:   # pragma: no cover - surfaced via the assert below
+            errors.append(err)
+
+    threads = [threading.Thread(target=setter, args=(i,)) for i in range(n)]
+    threads += [threading.Thread(target=unsetter, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    assert fb.names("nw") == [f"NEW_{i:03d}" for i in range(n)]   # all olds gone, all news kept
 
 
 def test_file_set_write_failure_raises_credentials_error(monkeypatch):

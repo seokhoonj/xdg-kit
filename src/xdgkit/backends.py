@@ -87,8 +87,9 @@ class FileBackend:
 
     def set(self, app: str, name: str, *, value: str) -> None:
         """Store ``value`` under ``name``, creating or updating the file at mode 0600 in a
-        0700 directory. The whole read-modify-write is serialized so concurrent writers to
-        one store never lose each other's keys.
+        0700 directory. The whole read-modify-write is serialized -- always across threads of
+        this process, and across processes too wherever the OS file lock can be taken -- so
+        concurrent writers to one store do not lose each other's keys.
 
         Raises:
             CredentialsError: the existing file is unreadable or malformed, or the write
@@ -163,8 +164,13 @@ class FileBackend:
 # silently dropping the other's key. So the whole critical section is held under a lock that
 # serializes across both threads (a per-path threading.Lock) and processes (a blocking OS
 # lock on a sibling .lock file, which -- unlike credentials.json -- is never replaced, so an
-# atomic rename cannot orphan a holder's lock).
+# atomic rename cannot orphan a holder's lock). Where the OS lock cannot be taken (no
+# primitive on the platform, or flock unsupported on a network FS), it degrades to the
+# thread lock alone -- correct for the single-process norm, best-effort across processes.
 
+# One lock per distinct store path, kept for the process lifetime. The registry is bounded
+# by the number of stores a process touches (a handful), not by call volume, so a plain dict
+# is right here -- eviction would buy nothing worth the machinery.
 _store_thread_locks: dict[str, threading.Lock] = {}
 _store_thread_locks_guard = threading.Lock()
 
@@ -183,27 +189,30 @@ def _thread_lock_for(key: str) -> threading.Lock:
 @contextmanager
 def _exclusive_store_lock(path: Path) -> Iterator[None]:
     """Hold an exclusive lock over a read-modify-write of the store file ``path``. Degrades
-    to thread-only serialization where no OS lock primitive exists or the lock file cannot
-    be created -- the in-process guarantee still holds, and single-process use is the norm."""
+    to thread-only serialization where no OS lock primitive exists, the lock file cannot be
+    created, or the OS lock cannot be taken (e.g. ``flock`` unsupported on a network FS) --
+    the in-process guarantee still holds, and single-process use is the norm."""
     thread_lock = _thread_lock_for(str(path))
     thread_lock.acquire()
-    handle: IO[str] | None = None
     try:
+        restrict_dir_to_owner(path.parent)
         try:
-            restrict_dir_to_owner(path.parent)
-            handle = (path.parent / f"{path.name}.lock").open("a+")
+            handle: IO[str] | None = (path.parent / f"{path.name}.lock").open("a+")
         except OSError:
             handle = None   # cannot create the lock file: rely on the thread lock alone
-        if handle is not None:
-            lock_exclusive(handle, blocking=True)   # wait, don't race, for a store write
-        yield
+        locked = False
+        try:
+            locked = handle is not None and lock_exclusive(handle, blocking=True)
+            yield
+        finally:
+            if handle is not None:
+                try:
+                    if locked:
+                        unlock(handle)   # only when we actually took it -- never a no-op region
+                finally:
+                    handle.close()
     finally:
-        if handle is not None:
-            try:
-                unlock(handle)
-            finally:
-                handle.close()
-        thread_lock.release()
+        thread_lock.release()   # its own finally: always runs, even if unlock/close raises
 
 
 class KeyringBackend:
