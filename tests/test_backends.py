@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from xdgkit.backends import FileBackend, KeyringBackend, default_backend
-from xdgkit.errors import CredentialsError, XdgkitError
+from xdg_kit.backends import FileBackend, KeyringBackend, default_backend
+from xdg_kit.errors import CredentialsError, XdgKitError
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
@@ -114,7 +114,7 @@ def test_file_concurrent_set_no_lost_update():
 def _process_set_worker(key: str, value: str) -> None:
     """Set one key in the shared store from a separate process -- so the sibling ``.lock``
     OS lock, not the per-process thread lock, is what serializes the read-modify-write."""
-    from xdgkit.backends import FileBackend
+    from xdg_kit.backends import FileBackend
 
     FileBackend().set("nw", key, value=value)
 
@@ -187,12 +187,12 @@ def test_file_concurrent_set_and_unset_keeps_expected_keys():
 
 
 def test_file_set_write_failure_raises_credentials_error(monkeypatch):
-    """The atomic layer raises XdgkitError; FileBackend.set must honour its documented
+    """The atomic layer raises XdgKitError; FileBackend.set must honour its documented
     CredentialsError contract by converting it."""
     def boom(*a, **k):
-        raise XdgkitError("disk full")
+        raise XdgKitError("disk full")
 
-    monkeypatch.setattr("xdgkit.backends.write_text_atomic", boom)
+    monkeypatch.setattr("xdg_kit.backends.write_text_atomic", boom)
     with pytest.raises(CredentialsError):
         FileBackend().set("nw", "K", value="v")
 
@@ -317,7 +317,7 @@ def test_keyring_falls_back_when_unavailable(monkeypatch, capsys):
     mod.get_password = boom
     mod.set_password = boom
     monkeypatch.setitem(sys.modules, "keyring", mod)
-    monkeypatch.setattr("xdgkit.backends._warned_keyring_fallback", False)
+    monkeypatch.setattr("xdg_kit.backends._warned_keyring_fallback", False)
     fb = FileBackend()
     kb = KeyringBackend(fallback=fb)
     kb.set("nw", "K", value="to-file")

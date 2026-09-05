@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from xdgkit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
+from xdg_kit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
 
 
 def test_config_dir_uses_xdg_config_home(tmp_path):

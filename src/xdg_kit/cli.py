@@ -1,11 +1,11 @@
-"""The ``xdgkit`` command: manage any app's stored secrets and inspect its directories,
+"""The ``xdg-kit`` command: manage any app's stored secrets and inspect its directories,
 from one place with one format.
 
-Instead of remembering each package's own way to store a key, ``xdgkit set <app> <name>``
+Instead of remembering each package's own way to store a key, ``xdg-kit set <app> <name>``
 writes the same ``credentials.json`` (mode 0600) that every consumer reads. The value is
 prompted for without echo when omitted, so it never lands in shell history. ``get`` masks
 by default, ``list`` shows names only, and ``doctor`` reports files that are readable
-beyond their owner. Everything here operates on xdgkit's own stores and directories -- it
+beyond their owner. Everything here operates on xdg-kit's own stores and directories -- it
 is not a general-purpose CLI.
 """
 
@@ -18,18 +18,18 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from xdgkit import __version__
-from xdgkit.backends import FileBackend, default_backend
-from xdgkit.credentials import Credentials
-from xdgkit.errors import InvalidAppNameError, XdgkitError
-from xdgkit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
-from xdgkit.permissions import warn_if_group_or_world_readable
-from xdgkit.runtime import runtime_dir
+from xdg_kit import __version__
+from xdg_kit.backends import FileBackend, default_backend
+from xdg_kit.credentials import Credentials
+from xdg_kit.errors import InvalidAppNameError, XdgKitError
+from xdg_kit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
+from xdg_kit.permissions import warn_if_group_or_world_readable
+from xdg_kit.runtime import runtime_dir
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point for the ``xdgkit`` console script. Returns a process exit code:
-    0 on success, 1 on an ``XdgkitError`` (reported as a one-line message, not a
+    """Entry point for the ``xdg-kit`` console script. Returns a process exit code:
+    0 on success, 1 on an ``XdgKitError`` (reported as a one-line message, not a
     traceback), 2 on a usage error (from argparse). ``--version`` (and ``-h``) do not
     return -- argparse prints and raises ``SystemExit(0)`` from ``parse_args``."""
     parser = _build_parser()
@@ -39,19 +39,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return exit_code
     except InvalidAppNameError as err:
         # an invalid app name is a usage mistake, not a runtime failure
-        print(f"xdgkit: error: {err}", file=sys.stderr)
+        print(f"xdg-kit: error: {err}", file=sys.stderr)
         return 2
-    except XdgkitError as err:
-        print(f"xdgkit: error: {err}", file=sys.stderr)
+    except XdgKitError as err:
+        print(f"xdg-kit: error: {err}", file=sys.stderr)
         return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="xdgkit", description=__doc__)
+    parser = argparse.ArgumentParser(prog="xdg-kit", description=__doc__)
     parser.add_argument(
         "--version",
         action="version",
-        version=f"xdgkit {__version__}",
+        version=f"xdg-kit {__version__}",
         help="print the installed version and exit",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -120,7 +120,7 @@ def _credentials(args: argparse.Namespace) -> Credentials:
 def _cmd_set(args: argparse.Namespace) -> int:
     value = args.value if args.value is not None else getpass.getpass(f"{args.name}: ")
     if not value:
-        print("xdgkit: error: empty value; nothing stored", file=sys.stderr)
+        print("xdg-kit: error: empty value; nothing stored", file=sys.stderr)
         return 1
     _credentials(args).set(args.name, value=value)
     print(f"stored {args.name} for {args.app}")
@@ -133,7 +133,7 @@ def _cmd_get(args: argparse.Namespace) -> int:
     else:
         value = default_backend(use_keyring=args.keyring).get(args.app, args.name)  # this store only
     if value is None:
-        print(f"xdgkit: {args.name} is not set for {args.app}", file=sys.stderr)
+        print(f"xdg-kit: {args.name} is not set for {args.app}", file=sys.stderr)
         return 1
     print(value if args.reveal else _mask(value))
     return 0
@@ -183,7 +183,7 @@ def _discover_apps() -> list[str]:
     subdirectories of ``config_dir``'s parent that contain a ``credentials.json``. A
     subdirectory whose name is not a valid app segment is skipped, so one stray neighbour
     cannot abort the whole sweep."""
-    config_base = config_dir("xdgkit").parent   # the XDG config home itself
+    config_base = config_dir("xdg-kit").parent   # the XDG config home itself
     if not config_base.is_dir():
         return []
     found = []

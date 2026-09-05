@@ -1,12 +1,12 @@
-"""The xdgkit command: store, read (masked), list, remove, inspect, and check."""
+"""The xdg-kit command: store, read (masked), list, remove, inspect, and check."""
 
 from __future__ import annotations
 
 import pytest
 
-from xdgkit import __version__
-from xdgkit.backends import FileBackend
-from xdgkit.cli import main
+from xdg_kit import __version__
+from xdg_kit.backends import FileBackend
+from xdg_kit.cli import main
 
 
 def test_set_with_value_stores(capsys):
@@ -16,12 +16,12 @@ def test_set_with_value_stores(capsys):
 
 
 def test_version_flag_prints_and_exits_zero(capsys):
-    """`xdgkit --version` prints the version at the top level and exits 0 -- not shoved
+    """`xdg-kit --version` prints the version at the top level and exits 0 -- not shoved
     behind a required subcommand (argparse's version action raises SystemExit)."""
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == f"xdgkit {__version__}"
+    assert capsys.readouterr().out.strip() == f"xdg-kit {__version__}"
 
 
 def test_version_wins_over_trailing_subcommand(capsys):
@@ -30,12 +30,12 @@ def test_version_wins_over_trailing_subcommand(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version", "set"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == f"xdgkit {__version__}"
+    assert capsys.readouterr().out.strip() == f"xdg-kit {__version__}"
 
 
 def test_no_arguments_exits_with_usage_error(capsys):
     """With no subcommand argparse raises SystemExit(2) and writes usage to stderr -- a
-    usage error, not a returned code (main's except clauses catch XdgkitError, not this)."""
+    usage error, not a returned code (main's except clauses catch XdgKitError, not this)."""
     with pytest.raises(SystemExit) as exc:
         main([])
     assert exc.value.code == 2

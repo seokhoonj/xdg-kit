@@ -21,7 +21,7 @@ import stat
 import sys
 from pathlib import Path
 
-from xdgkit.errors import InsecureStorageError, XdgkitError
+from xdg_kit.errors import InsecureStorageError, XdgKitError
 
 __all__ = [
     "PRIVATE_FILE_MODE",
@@ -73,7 +73,7 @@ def ensure_private_dir(path: Path) -> Path:
     Raises:
         InsecureStorageError: the path exists but is a symlink, is not a directory, or is
             owned by another user.
-        XdgkitError: the directory could not be created (an I/O failure).
+        XdgKitError: the directory could not be created (an I/O failure).
     """
     try:
         if os.name != "posix":
@@ -89,8 +89,8 @@ def ensure_private_dir(path: Path) -> Path:
         return path
     except OSError as err:
         # mkdir/chmod on a read-only or exhausted filesystem raise raw OSError; convert it
-        # to the documented XdgkitError so a caller told to `except XdgkitError` is honoured.
-        raise XdgkitError(f"could not create private directory {path}: {err}") from err
+        # to the documented XdgKitError so a caller told to `except XdgKitError` is honoured.
+        raise XdgKitError(f"could not create private directory {path}: {err}") from err
 
 
 def restrict_dir_to_owner(path: Path) -> None:

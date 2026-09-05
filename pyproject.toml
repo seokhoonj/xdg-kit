@@ -6,7 +6,7 @@ requires      = ["hatchling>=1.27,<1.32"]
 build-backend = "hatchling.build"
 
 [project]
-name            = "xdgkit"
+name            = "xdg-kit"
 version         = "0.1.0"
 description     = "Secure XDG-style application storage for Python: paths, credentials, permissions, and runtime files."
 readme          = "README.md"
@@ -31,9 +31,9 @@ requires-python = ">=3.11"
 dependencies    = []
 
 [project.urls]
-Homepage   = "https://github.com/seokhoonj/xdgkit"
-Repository = "https://github.com/seokhoonj/xdgkit"
-Issues     = "https://github.com/seokhoonj/xdgkit/issues"
+Homepage   = "https://github.com/seokhoonj/xdg-kit"
+Repository = "https://github.com/seokhoonj/xdg-kit"
+Issues     = "https://github.com/seokhoonj/xdg-kit/issues"
 
 [project.optional-dependencies]
 keyring = ["keyring>=24"]
@@ -45,10 +45,10 @@ dev = [
 ]
 
 [project.scripts]
-xdgkit = "xdgkit.cli:main"
+xdg-kit = "xdg_kit.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/xdgkit"]
+packages = ["src/xdg_kit"]
 
 [tool.ruff]
 line-length    = 100
@@ -80,5 +80,5 @@ ignore_missing_imports = true
 # the host's own (fcntl vs msvcrt). Both branches need an ignore and one is always
 # unused, so type-checking on either OS means not warning here.
 [[tool.mypy.overrides]]
-module = ["xdgkit._oslock"]
+module = ["xdg_kit._oslock"]
 warn_unused_ignores = false

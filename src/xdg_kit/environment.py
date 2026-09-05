@@ -1,7 +1,7 @@
 """Reading values from the environment with one consistent rule: a blank or
 whitespace-only value counts as *absent*.
 
-xdgkit resolves both directories (an ``$XDG_CONFIG_HOME`` or a per-app override) and
+xdg-kit resolves both directories (an ``$XDG_CONFIG_HOME`` or a per-app override) and
 secrets (a ``GEMINI_API_KEY``) from the environment before falling back to a file. In
 every case an empty string must read as "not set" rather than as an explicit empty
 value, so that an exported-but-blank variable falls through to the default instead of

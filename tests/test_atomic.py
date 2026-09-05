@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from xdgkit.atomic import write_bytes_atomic, write_text_atomic
-from xdgkit.errors import XdgkitError
+from xdg_kit.atomic import write_bytes_atomic, write_text_atomic
+from xdg_kit.errors import XdgKitError
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
@@ -45,7 +45,7 @@ def test_write_failure_wrapped(tmp_path):
     # a path whose parent is a file, not a directory, cannot be written
     parent_is_file = tmp_path / "afile"
     parent_is_file.write_text("x")
-    with pytest.raises(XdgkitError):
+    with pytest.raises(XdgKitError):
         write_text_atomic(parent_is_file / "child", "data")
 
 
@@ -56,8 +56,8 @@ def test_replace_failure_cleans_up_and_leaves_target(tmp_path, monkeypatch):
     def boom(src, dst):
         raise OSError("replace failed")
 
-    monkeypatch.setattr("xdgkit.atomic.os.replace", boom)
-    with pytest.raises(XdgkitError):
+    monkeypatch.setattr("xdg_kit.atomic.os.replace", boom)
+    with pytest.raises(XdgKitError):
         write_text_atomic(target, "new")
     assert target.read_text() == "old"            # original untouched
     assert list(tmp_path.glob("*.tmp")) == []     # no secret-bearing temp debris left

@@ -22,10 +22,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdgkit.backends import SecretBackend, default_backend
-from xdgkit.environment import env_value
-from xdgkit.errors import CredentialsError
-from xdgkit.paths import app_dir_segment
+from xdg_kit.backends import SecretBackend, default_backend
+from xdg_kit.environment import env_value
+from xdg_kit.errors import CredentialsError
+from xdg_kit.paths import app_dir_segment
 
 __all__ = [
     "Credentials",
@@ -100,7 +100,7 @@ class Credentials:
         if value is None:
             raise CredentialsError(
                 f"required secret {name!r} is not set for {self._app}: set the {name} "
-                f"environment variable, or store it with 'xdgkit set {self._app} {name}'"
+                f"environment variable, or store it with 'xdg-kit set {self._app} {name}'"
             )
         return value
 

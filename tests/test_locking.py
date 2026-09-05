@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from xdgkit.errors import InvalidAppNameError
-from xdgkit.locking import FileLock, single_instance
+from xdg_kit.errors import InvalidAppNameError
+from xdg_kit.locking import FileLock, single_instance
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="advisory file locks")
 

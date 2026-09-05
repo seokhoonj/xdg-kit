@@ -31,11 +31,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Protocol
 
-from xdgkit._oslock import lock_exclusive, unlock
-from xdgkit.atomic import write_text_atomic
-from xdgkit.errors import CredentialsError, XdgkitError
-from xdgkit.paths import config_dir
-from xdgkit.permissions import (
+from xdg_kit._oslock import lock_exclusive, unlock
+from xdg_kit.atomic import write_text_atomic
+from xdg_kit.errors import CredentialsError, XdgKitError
+from xdg_kit.paths import config_dir
+from xdg_kit.permissions import (
     PRIVATE_FILE_MODE,
     restrict_dir_to_owner,
     warn_if_group_or_world_readable,
@@ -145,14 +145,14 @@ class FileBackend:
 
     def _save(self, app: str, secret_value_by_name: dict[str, object]) -> None:
         """Write the map back to ``credentials.json`` atomically at mode 0600, in a config
-        directory hardened to 0700 first. Converts the atomic layer's ``XdgkitError`` to
+        directory hardened to 0700 first. Converts the atomic layer's ``XdgKitError`` to
         ``CredentialsError`` to honour the ``set``/``unset`` contract."""
         path = self.path(app)
         restrict_dir_to_owner(path.parent)
         text = json.dumps(secret_value_by_name, indent=2, sort_keys=True) + "\n"
         try:
             write_text_atomic(path, text, mode=PRIVATE_FILE_MODE)
-        except XdgkitError as err:
+        except XdgKitError as err:
             raise CredentialsError(str(err)) from err
 
 
@@ -267,7 +267,7 @@ def _warn_keyring_fallback_once(err: Exception) -> None:
         return
     _warned_keyring_fallback = True
     print(
-        f"xdgkit: warning: OS keyring unavailable ({err}); using the file backend "
+        f"xdg-kit: warning: OS keyring unavailable ({err}); using the file backend "
         f"(credentials.json, mode 0600) instead",
         file=sys.stderr,
     )

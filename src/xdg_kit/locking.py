@@ -17,9 +17,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import IO
 
-from xdgkit._oslock import lock_exclusive, unlock
-from xdgkit.paths import app_dir_segment
-from xdgkit.runtime import runtime_dir
+from xdg_kit._oslock import lock_exclusive, unlock
+from xdg_kit.paths import app_dir_segment
+from xdg_kit.runtime import runtime_dir
 
 __all__ = [
     "FileLock",
@@ -50,7 +50,7 @@ class FileLock:
         another process already holds it. Idempotent while held.
 
         Raises:
-            XdgkitError / InsecureStorageError: the runtime directory could not be created
+            XdgKitError / InsecureStorageError: the runtime directory could not be created
                 or secured (propagated from ``runtime_dir``).
         """
         if self.acquired:
@@ -91,7 +91,7 @@ def single_instance(app: str, name: str) -> Iterator[bool]:
 
     Raises:
         InvalidAppNameError: ``app`` or ``name`` is not a valid directory segment.
-        XdgkitError / InsecureStorageError: propagated from ``runtime_dir``.
+        XdgKitError / InsecureStorageError: propagated from ``runtime_dir``.
     """
     lock = FileLock(app, name)
     acquired = lock.acquire()

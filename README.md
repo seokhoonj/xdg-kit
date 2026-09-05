@@ -1,6 +1,6 @@
 **English** | [한국어](README.ko.md)
 
-# xdgkit
+# xdg-kit
 
 Secure XDG-style application storage for Python: paths, credentials, permissions, and
 runtime files.
@@ -23,14 +23,14 @@ way, on every OS.
 ## Install
 
 ```sh
-pip install xdgkit            # file store, zero runtime dependencies
-pip install "xdgkit[keyring]" # add the optional OS keyring backend
+pip install xdg-kit            # file store, zero runtime dependencies
+pip install "xdg-kit[keyring]" # add the optional OS keyring backend
 ```
 
 Check it worked:
 
 ```sh
-xdgkit --version
+xdg-kit --version
 ```
 
 Requires Python 3.11+.
@@ -38,7 +38,7 @@ Requires Python 3.11+.
 ## Directories
 
 ```python
-from xdgkit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
+from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
 
 config_dir("myapp")   # ~/.config/myapp        (or $XDG_CONFIG_HOME/...)
 data_dir("myapp")     # ~/.local/share/myapp   (or $XDG_DATA_HOME/...)
@@ -58,7 +58,7 @@ directs, and returns it (pass `create=False` to compute the path without creatin
 ## Secrets
 
 ```python
-from xdgkit import Credentials, secret, require, set_secret, unset_secret, secret_names
+from xdg_kit import Credentials, secret, require, set_secret, unset_secret, secret_names
 
 # Resolution order: override > environment > shared stores > this app's store.
 creds = Credentials("myapp", shared=["auth"])
@@ -80,23 +80,23 @@ The **shared store** is how a key common to several apps stops being duplicated:
 once under a shared app (say `"auth"`), and every consumer resolves it with
 `shared=["auth"]`. A key specific to one app stays in that app's own store.
 
-## The `xdgkit` command
+## The `xdg-kit` command
 
 Manage any app's secrets from one place, in one format — no need to learn each package's
 own way to store a key:
 
 ```sh
-xdgkit set myapp API_KEY               # prompts without echo; writes credentials.json (0600)
-xdgkit set myapp API_KEY --value sk-…  # or pass it directly (exposes it in argv; prefer the prompt)
-xdgkit list myapp                      # names only, never values
-xdgkit get myapp API_KEY               # masked (sk***ef); reads the stored value only
-xdgkit get myapp API_KEY --reveal      # print in full
-xdgkit get myapp API_KEY --resolve     # also consult the environment variable, not just the stored value
-xdgkit unset myapp API_KEY
-xdgkit path myapp                      # print the credentials.json path
-xdgkit dirs myapp                      # print all five directories
-xdgkit doctor                          # check every app's credentials file/dir permissions
-xdgkit doctor myapp other-app          # check only the named apps
+xdg-kit set myapp API_KEY               # prompts without echo; writes credentials.json (0600)
+xdg-kit set myapp API_KEY --value sk-…  # or pass it directly (exposes it in argv; prefer the prompt)
+xdg-kit list myapp                      # names only, never values
+xdg-kit get myapp API_KEY               # masked (sk***ef); reads the stored value only
+xdg-kit get myapp API_KEY --reveal      # print in full
+xdg-kit get myapp API_KEY --resolve     # also consult the environment variable, not just the stored value
+xdg-kit unset myapp API_KEY
+xdg-kit path myapp                      # print the credentials.json path
+xdg-kit dirs myapp                      # print all five directories
+xdg-kit doctor                          # check every app's credentials file/dir permissions
+xdg-kit doctor myapp other-app          # check only the named apps
 ```
 
 `set`, `get`, `list`, and `unset` accept `--keyring` to operate on the OS keyring backend
@@ -109,8 +109,8 @@ The file store is the default because it is reliable everywhere — headless ser
 containers, and multiple machines. The OS keyring is opt-in:
 
 ```python
-from xdgkit.backends import FileBackend, KeyringBackend, default_backend
-from xdgkit import Credentials
+from xdg_kit.backends import FileBackend, KeyringBackend, default_backend
+from xdg_kit import Credentials
 
 backend = KeyringBackend(fallback=FileBackend())   # keyring on a desktop, file on a server
 creds = Credentials("myapp", backend=backend)
@@ -129,10 +129,10 @@ entry) to avoid an older keyring value shadowing it.
 ## Redacting secrets from logs
 
 ```python
-from xdgkit.scrub import scrub_secrets, scrub_exception
+from xdg_kit.scrub import scrub_secrets, scrub_exception
 
 scrub_secrets("failed with sk-abc123", [key])   # "failed with ***"
-raise scrub_exception(err, [key])                # scrubs the whole __cause__/__context__ chain
+raise scrub_exception(err, [key])               # scrubs the whole __cause__/__context__ chain
 ```
 
 `scrub_exception` never raises and rewrites each exception's `args` and a string `url`
@@ -142,7 +142,7 @@ through `scrub_secrets`.
 ## Single-instance locking
 
 ```python
-from xdgkit.locking import FileLock, single_instance
+from xdg_kit.locking import FileLock, single_instance
 
 with single_instance("myapp", "poll") as acquired:
     if not acquired:
@@ -164,27 +164,27 @@ crash.
 
 | Import | What it is |
 |--------|------------|
-| `config_dir` / `data_dir` / `state_dir` / `cache_dir` (`xdgkit`) | XDG directory for an app (a `Path`). |
-| `runtime_dir(app, *, create=True)` (`xdgkit`) | Secured session runtime directory. |
-| `Credentials(app, *, shared=(), backend=None)` (`xdgkit`) | The four-tier secret resolver: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
-| `secret` / `require` / `set_secret` / `unset_secret` / `secret_names` (`xdgkit`) | Module-level one-shot convenience over `Credentials`. |
-| `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdgkit.backends`) | The storage seam and its two implementations. |
-| `scrub_secrets` / `scrub_exception` (`xdgkit.scrub`) | Redact secret values from text and exception chains. |
-| `FileLock` / `single_instance` (`xdgkit.locking`) | Single-instance advisory locking in `runtime_dir`. |
-| `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdgkit.permissions`) | Directory/file permission guarantees and checks. |
-| `write_bytes_atomic` / `write_text_atomic` (`xdgkit.atomic`) | Atomic 0600 writes. |
-| `env_value` / `absolute_override` (`xdgkit.environment`) | Read an env value (blank = absent) / an absolute-path override. |
-| `app_dir_segment` (`xdgkit.paths`) | Validate an app name as a safe path segment. |
-| `XdgkitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdgkit`) | The exception hierarchy. |
+| `config_dir` / `data_dir` / `state_dir` / `cache_dir` (`xdg_kit`) | XDG directory for an app (a `Path`). |
+| `runtime_dir(app, *, create=True)` (`xdg_kit`) | Secured session runtime directory. |
+| `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | The four-tier secret resolver: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
+| `secret` / `require` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | Module-level one-shot convenience over `Credentials`. |
+| `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | The storage seam and its two implementations. |
+| `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | Redact secret values from text and exception chains. |
+| `FileLock` / `single_instance` (`xdg_kit.locking`) | Single-instance advisory locking in `runtime_dir`. |
+| `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | Directory/file permission guarantees and checks. |
+| `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | Atomic 0600 writes. |
+| `env_value` / `absolute_override` (`xdg_kit.environment`) | Read an env value (blank = absent) / an absolute-path override. |
+| `app_dir_segment` (`xdg_kit.paths`) | Validate an app name as a safe path segment. |
+| `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | The exception hierarchy. |
 
 ## For library authors
 
-`xdgkit` provides only the base layer — directories, secret resolution, permissions,
+`xdg-kit` provides only the base layer — directories, secret resolution, permissions,
 atomic writes, locking, and scrubbing. Your package keeps its own domain configuration
-(accounts, routes, topics) and reaches for xdgkit underneath:
+(accounts, routes, topics) and reaches for xdg-kit underneath:
 
 ```python
-from xdgkit import config_dir, Credentials
+from xdg_kit import config_dir, Credentials
 
 def credentials_path():
     return config_dir("yourapp") / "credentials.json"

@@ -34,8 +34,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from xdgkit.environment import absolute_override
-from xdgkit.errors import InvalidAppNameError, XdgkitError
+from xdg_kit.environment import absolute_override
+from xdg_kit.errors import InvalidAppNameError, XdgKitError
 
 __all__ = [
     "config_dir",
@@ -76,7 +76,7 @@ def config_dir(app: str) -> Path:
 
     Raises:
         InvalidAppNameError: ``app`` is not a valid directory segment.
-        XdgkitError: no home directory can be determined and ``XDG_CONFIG_HOME`` is unset
+        XdgKitError: no home directory can be determined and ``XDG_CONFIG_HOME`` is unset
             or not absolute.
     """
     return _xdg_app_dir("XDG_CONFIG_HOME", ".config", app_dir_segment(app))
@@ -91,7 +91,7 @@ def data_dir(app: str) -> Path:
 
     Raises:
         InvalidAppNameError: ``app`` is not a valid directory segment.
-        XdgkitError: no home directory can be determined and neither the override nor
+        XdgKitError: no home directory can be determined and neither the override nor
             ``XDG_DATA_HOME`` gives an absolute path.
     """
     segment = app_dir_segment(app)
@@ -109,7 +109,7 @@ def state_dir(app: str) -> Path:
 
     Raises:
         InvalidAppNameError: ``app`` is not a valid directory segment.
-        XdgkitError: no home directory can be determined and neither the override nor
+        XdgKitError: no home directory can be determined and neither the override nor
             ``XDG_STATE_HOME`` gives an absolute path.
     """
     segment = app_dir_segment(app)
@@ -126,7 +126,7 @@ def cache_dir(app: str) -> Path:
 
     Raises:
         InvalidAppNameError: ``app`` is not a valid directory segment.
-        XdgkitError: no home directory can be determined and ``XDG_CACHE_HOME`` is unset
+        XdgKitError: no home directory can be determined and ``XDG_CACHE_HOME`` is unset
             or not absolute.
     """
     return _xdg_app_dir("XDG_CACHE_HOME", ".cache", app_dir_segment(app))
@@ -140,16 +140,16 @@ def _xdg_app_dir(env_name: str, home_subpath: str, segment: str) -> Path:
     relative, or unresolvable value is ignored per the spec.
 
     Raises:
-        XdgkitError: no absolute env value and no home directory can be determined --
+        XdgKitError: no absolute env value and no home directory can be determined --
             converted from the ``RuntimeError`` ``Path.home`` raises, so it stays inside
-            xdgkit's error surface."""
+            xdg-kit's error surface."""
     root = absolute_override(env_name)
     if root is not None:
         return root / segment
     try:
         home = Path.home()
     except RuntimeError as err:
-        raise XdgkitError(
+        raise XdgKitError(
             f"cannot locate ~/{home_subpath}/{segment}: no home directory "
             f"(set HOME, or set {env_name} to an absolute path)"
         ) from err

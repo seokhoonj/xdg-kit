@@ -6,9 +6,9 @@ import os
 
 import pytest
 
-from xdgkit import permissions
-from xdgkit.errors import InsecureStorageError
-from xdgkit.permissions import (
+from xdg_kit import permissions
+from xdg_kit.errors import InsecureStorageError
+from xdg_kit.permissions import (
     ensure_private_dir,
     restrict_dir_to_owner,
     warn_if_group_or_world_readable,

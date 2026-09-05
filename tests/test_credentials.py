@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from xdgkit.backends import FileBackend
-from xdgkit.credentials import Credentials, require, secret, secret_names, set_secret
-from xdgkit.errors import CredentialsError, InvalidAppNameError
+from xdg_kit.backends import FileBackend
+from xdg_kit.credentials import Credentials, require, secret, secret_names, set_secret
+from xdg_kit.errors import CredentialsError, InvalidAppNameError
 
 
 def test_override_beats_everything(monkeypatch):

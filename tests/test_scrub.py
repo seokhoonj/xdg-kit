@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xdgkit.scrub import REDACTION, scrub_exception, scrub_secrets
+from xdg_kit.scrub import REDACTION, scrub_exception, scrub_secrets
 
 
 def test_scrub_replaces_each_secret():

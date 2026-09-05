@@ -55,7 +55,7 @@ jobs:
 
       - name: Confirm the default install has no runtime dependencies
         # The zero-dependency default is in the README and the pyproject: keyring is an
-        # opt-in extra, so a plain `pip install xdgkit` must pull in nothing. A claim
+        # opt-in extra, so a plain `pip install xdg-kit` must pull in nothing. A claim
         # nothing checks quietly stops being true, so install into a bare environment
         # and assert the runtime (non-extra) requirement set is empty.
         run: |
@@ -63,33 +63,33 @@ jobs:
           uv pip install --python /tmp/bare/bin/python .
           /tmp/bare/bin/python -c "
           import importlib.metadata as md
-          requires = md.requires('xdgkit') or []
+          requires = md.requires('xdg-kit') or []
           runtime = [r for r in requires if 'extra ==' not in r]
           assert not runtime, f'runtime dependencies appeared: {runtime}'
-          import xdgkit
-          print('xdgkit', xdgkit.__version__, 'imports with no third-party packages')
+          import xdg_kit
+          print('xdg-kit', xdg_kit.__version__, 'imports with no third-party packages')
           "
 
       - name: Confirm the console script installed
-        # pyproject declares an `xdgkit` entry point; a wheel that dropped it would
+        # pyproject declares an `xdg-kit` entry point; a wheel that dropped it would
         # leave the README and the docs pointing at a command that is not there. The
         # top-level --version must print (not be shoved behind a required subcommand).
         run: |
           uv venv /tmp/cli --python ${{ matrix.python-version }}
           uv pip install --python /tmp/cli/bin/python .
-          /tmp/cli/bin/xdgkit --version
+          /tmp/cli/bin/xdg-kit --version
 
       - name: Confirm a user's type checker can see the hints
         # Every hint in this package is invisible to a user unless py.typed ships
         # alongside it (PEP 561), and the source cannot answer whether it did:
-        # src/xdgkit/py.typed can sit in git while the built wheel omits it. So ask
+        # src/xdg_kit/py.typed can sit in git while the built wheel omits it. So ask
         # it the way a user does -- install the built package into a clean
         # environment and run their checker over their code.
         run: |
           uv venv /tmp/typed --python ${{ matrix.python-version }}
           uv pip install --python /tmp/typed/bin/python . mypy
           cat > /tmp/user_code.py <<'PY'
-          from xdgkit import runtime_dir
+          from xdg_kit import runtime_dir
 
           # create is bool; a str is not, so a checker that can see the shipped hints
           # must reject it and name the expected type.

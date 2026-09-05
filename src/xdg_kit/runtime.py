@@ -22,9 +22,9 @@ import os
 import tempfile
 from pathlib import Path
 
-from xdgkit.environment import absolute_override
-from xdgkit.paths import app_dir_segment
-from xdgkit.permissions import ensure_private_dir
+from xdg_kit.environment import absolute_override
+from xdg_kit.paths import app_dir_segment
+from xdg_kit.permissions import ensure_private_dir
 
 __all__ = ["runtime_dir"]
 
@@ -43,7 +43,7 @@ def runtime_dir(app: str, *, create: bool = True) -> Path:
         InvalidAppNameError: ``app`` is not a valid directory segment.
         InsecureStorageError: ``create`` and a directory on the path exists but is a symlink
             or owned by another user (a hijack attempt in a shared temp directory).
-        XdgkitError: ``create`` and the directory could not be created.
+        XdgKitError: ``create`` and the directory could not be created.
     """
     segment = app_dir_segment(app)
     base = absolute_override("XDG_RUNTIME_DIR")
@@ -59,9 +59,9 @@ def runtime_dir(app: str, *, create: bool = True) -> Path:
 
 def _fallback_runtime_root() -> Path:
     """The per-user root under the system temp dir used when ``XDG_RUNTIME_DIR`` is unset:
-    ``<tempdir>/xdgkit-<uid>`` on POSIX (the uid keeps a shared ``/tmp`` from being
-    hijacked), ``<tempdir>/xdgkit`` elsewhere (Windows temp is already per-user)."""
+    ``<tempdir>/xdg-kit-<uid>`` on POSIX (the uid keeps a shared ``/tmp`` from being
+    hijacked), ``<tempdir>/xdg-kit`` elsewhere (Windows temp is already per-user)."""
     tmp = Path(tempfile.gettempdir())
     if os.name == "posix":
-        return tmp / f"xdgkit-{os.getuid()}"
-    return tmp / "xdgkit"
+        return tmp / f"xdg-kit-{os.getuid()}"
+    return tmp / "xdg-kit"

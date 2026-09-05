@@ -15,7 +15,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from xdgkit.errors import XdgkitError
+from xdg_kit.errors import XdgKitError
 
 __all__ = [
     "write_bytes_atomic",
@@ -28,7 +28,7 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
     the right mode for a secret). Creates the parent directory if needed.
 
     Raises:
-        XdgkitError: the write failed (an I/O error); the partial temp file is removed
+        XdgKitError: the write failed (an I/O error); the partial temp file is removed
             first so a failed write never leaves debris beside the target.
     """
     try:
@@ -47,13 +47,13 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
             tmp.unlink(missing_ok=True)
             raise
     except OSError as err:
-        raise XdgkitError(f"could not write {path}: {err}") from err
+        raise XdgKitError(f"could not write {path}: {err}") from err
 
 
 def write_text_atomic(path: Path, text: str, *, mode: int = 0o600) -> None:
     """Write ``text`` (UTF-8) to ``path`` atomically, leaving it mode ``mode``.
 
     Raises:
-        XdgkitError: the write failed (propagated from ``write_bytes_atomic``).
+        XdgKitError: the write failed (propagated from ``write_bytes_atomic``).
     """
     write_bytes_atomic(path, text.encode("utf-8"), mode=mode)
