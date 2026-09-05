@@ -156,65 +156,6 @@ class FileBackend:
             raise CredentialsError(str(err)) from err
 
 
-# --- store write serialization ------------------------------------------------
-#
-# A file store's set/unset is a read-modify-write: load the JSON, change one key, write it
-# back. The atomic write guards against a *torn* file, not against a lost *update* -- two
-# writers that both read the old map each write back their own change, and the last one wins,
-# silently dropping the other's key. So the whole critical section is held under a lock that
-# serializes across both threads (a per-path threading.Lock) and processes (a blocking OS
-# lock on a sibling .lock file, which -- unlike credentials.json -- is never replaced, so an
-# atomic rename cannot orphan a holder's lock). Where the OS lock cannot be taken (no
-# primitive on the platform, or flock unsupported on a network FS), it degrades to the
-# thread lock alone -- correct for the single-process norm, best-effort across processes.
-
-# One lock per distinct store path, kept for the process lifetime. The registry is bounded
-# by the number of stores a process touches (a handful), not by call volume, so a plain dict
-# is right here -- eviction would buy nothing worth the machinery.
-_store_thread_locks: dict[str, threading.Lock] = {}
-_store_thread_locks_guard = threading.Lock()
-
-
-def _thread_lock_for(key: str) -> threading.Lock:
-    """The process-wide lock for the store at ``key``, created on first use. Serializes two
-    threads of one process, which an OS file lock alone does not guarantee everywhere."""
-    with _store_thread_locks_guard:
-        lock = _store_thread_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _store_thread_locks[key] = lock
-        return lock
-
-
-@contextmanager
-def _exclusive_store_lock(path: Path) -> Iterator[None]:
-    """Hold an exclusive lock over a read-modify-write of the store file ``path``. Degrades
-    to thread-only serialization where no OS lock primitive exists, the lock file cannot be
-    created, or the OS lock cannot be taken (e.g. ``flock`` unsupported on a network FS) --
-    the in-process guarantee still holds, and single-process use is the norm."""
-    thread_lock = _thread_lock_for(str(path))
-    thread_lock.acquire()
-    try:
-        restrict_dir_to_owner(path.parent)
-        try:
-            handle: IO[str] | None = (path.parent / f"{path.name}.lock").open("a+")
-        except OSError:
-            handle = None   # cannot create the lock file: rely on the thread lock alone
-        locked = False
-        try:
-            locked = handle is not None and lock_exclusive(handle, blocking=True)
-            yield
-        finally:
-            if handle is not None:
-                try:
-                    if locked:
-                        unlock(handle)   # only when we actually took it -- never a no-op region
-                finally:
-                    handle.close()
-    finally:
-        thread_lock.release()   # its own finally: always runs, even if unlock/close raises
-
-
 class KeyringBackend:
     """Secrets in the OS keyring (service = ``app``, username = ``name``), via the
     ``keyring`` package, with a file ``fallback`` for headless machines where no keyring
@@ -336,3 +277,62 @@ def _clean(value: object) -> str | None:
     """A stored value normalised to a non-empty string, or ``None`` -- so a blank entry
     reads as absent and falls through to the next resolution tier."""
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+# --- store write serialization ------------------------------------------------
+#
+# A file store's set/unset is a read-modify-write: load the JSON, change one key, write it
+# back. The atomic write guards against a *torn* file, not against a lost *update* -- two
+# writers that both read the old map each write back their own change, and the last one wins,
+# silently dropping the other's key. So the whole critical section is held under a lock that
+# serializes across both threads (a per-path threading.Lock) and processes (a blocking OS
+# lock on a sibling .lock file, which -- unlike credentials.json -- is never replaced, so an
+# atomic rename cannot orphan a holder's lock). Where the OS lock cannot be taken (no
+# primitive on the platform, or flock unsupported on a network FS), it degrades to the
+# thread lock alone -- correct for the single-process norm, best-effort across processes.
+
+# One lock per distinct store path, kept for the process lifetime. The registry is bounded
+# by the number of stores a process touches (a handful), not by call volume, so a plain dict
+# is right here -- eviction would buy nothing worth the machinery.
+_store_thread_locks: dict[str, threading.Lock] = {}
+_store_thread_locks_guard = threading.Lock()
+
+
+def _thread_lock_for(key: str) -> threading.Lock:
+    """The process-wide lock for the store at ``key``, created on first use. Serializes two
+    threads of one process, which an OS file lock alone does not guarantee everywhere."""
+    with _store_thread_locks_guard:
+        lock = _store_thread_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _store_thread_locks[key] = lock
+        return lock
+
+
+@contextmanager
+def _exclusive_store_lock(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock over a read-modify-write of the store file ``path``. Degrades
+    to thread-only serialization where no OS lock primitive exists, the lock file cannot be
+    created, or the OS lock cannot be taken (e.g. ``flock`` unsupported on a network FS) --
+    the in-process guarantee still holds, and single-process use is the norm."""
+    thread_lock = _thread_lock_for(str(path))
+    thread_lock.acquire()
+    try:
+        restrict_dir_to_owner(path.parent)
+        try:
+            handle: IO[str] | None = (path.parent / f"{path.name}.lock").open("a+")
+        except OSError:
+            handle = None   # cannot create the lock file: rely on the thread lock alone
+        locked = False
+        try:
+            locked = handle is not None and lock_exclusive(handle, blocking=True)
+            yield
+        finally:
+            if handle is not None:
+                try:
+                    if locked:
+                        unlock(handle)   # only when we actually took it -- never a no-op region
+                finally:
+                    handle.close()
+    finally:
+        thread_lock.release()   # its own finally: always runs, even if unlock/close raises
