@@ -12,7 +12,7 @@ description     = "Secure XDG-style application storage for Python: paths, crede
 readme          = "README.md"
 license         = "MIT"
 license-files   = ["LICENSE"]
-authors         = [{ name = "seokhoonj", email = "seokhoonj@gmail.com" }]
+authors         = [{ name = "Seokhoon Joo", email = "seokhoonj@gmail.com" }]
 keywords        = ["xdg", "config", "credentials", "keyring", "paths", "runtime", "appdirs"]
 classifiers     = [
     "Development Status :: 4 - Beta",
