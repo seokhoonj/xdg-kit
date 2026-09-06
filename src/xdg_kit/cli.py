@@ -119,7 +119,9 @@ def _credentials(args: argparse.Namespace) -> Credentials:
 
 def _cmd_set(args: argparse.Namespace) -> int:
     value = args.value if args.value is not None else getpass.getpass(f"{args.name}: ")
-    if not value:
+    if not value.strip():
+        # A whitespace-only value reads back as absent (every read runs through _clean),
+        # so reject it here rather than store it and print a false "stored".
         print("xdg-kit: error: empty value; nothing stored", file=sys.stderr)
         return 1
     _credentials(args).set(args.name, value=value)

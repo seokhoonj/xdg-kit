@@ -47,6 +47,14 @@ def test_set_empty_value_is_refused(capsys):
     assert "empty value" in capsys.readouterr().err
 
 
+def test_set_whitespace_only_value_is_refused(capsys):
+    """A whitespace-only value reads back as absent (values are stripped on read), so `set`
+    must refuse it rather than report a false success for a secret no read can retrieve."""
+    assert main(["set", "nw", "K", "--value", "   "]) == 1
+    assert "empty value" in capsys.readouterr().err
+    assert FileBackend().get("nw", "K") is None   # nothing was stored
+
+
 def test_get_masks_by_default(capsys):
     main(["set", "nw", "K", "--value", "sk-abcdef"])
     capsys.readouterr()
