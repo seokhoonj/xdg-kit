@@ -114,7 +114,7 @@ def _add_keyring_flag(parser: argparse.ArgumentParser) -> None:
 
 
 def _credentials(args: argparse.Namespace) -> Credentials:
-    return Credentials(args.app, backend=default_backend(use_keyring=getattr(args, "keyring", False)))
+    return Credentials(args.app, backend=default_backend(use_keyring=args.keyring))
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
@@ -188,7 +188,7 @@ def _discover_apps() -> list[str]:
     config_base = config_dir("xdg-kit").parent   # the XDG config home itself
     if not config_base.is_dir():
         return []
-    found = []
+    discovered_apps = []
     for child in config_base.iterdir():
         if not (child.is_dir() and (child / "credentials.json").is_file()):
             continue
@@ -196,8 +196,8 @@ def _discover_apps() -> list[str]:
             app_dir_segment(child.name)
         except InvalidAppNameError:
             continue
-        found.append(child.name)
-    return sorted(found)
+        discovered_apps.append(child.name)
+    return sorted(discovered_apps)
 
 
 def _warn_if_dir_group_or_world_accessible(directory: Path, *, app: str) -> None:

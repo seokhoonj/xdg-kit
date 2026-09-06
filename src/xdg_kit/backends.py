@@ -162,11 +162,14 @@ class KeyringBackend:
     ``keyring`` package, with a file ``fallback`` for headless machines where no keyring
     backend exists.
 
-    When ``keyring`` is missing or raises (no backend, a locked store), the operation is
-    delegated to ``fallback`` in full and a one-time warning is printed so the user knows
-    their secrets are in the file, not the keyring. When ``keyring`` works it is the sole
-    source, and a successful ``set``/``unset`` also clears any file copy so opting into the
-    keyring never leaves plaintext behind. ``keyring`` provides no way to enumerate a
+    When ``keyring`` is missing or reports no backend, the operation is delegated to
+    ``fallback`` in full and a one-time warning is printed so the user knows their secrets
+    are in the file, not the keyring. When ``keyring`` is present but a call fails (a locked
+    or broken store), ``get`` and ``set`` still fall back to the file, but ``unset`` fails
+    closed -- it raises ``CredentialsError`` rather than risk reporting a delete that left
+    the secret retrievable from the keyring. When ``keyring`` works it is the sole source,
+    and a successful ``set``/``unset`` also clears any file copy so opting into the keyring
+    never leaves plaintext behind. ``keyring`` provides no way to enumerate a
     service's keys, so ``names`` reports only what the ``fallback`` holds -- keys stored
     solely in the OS keyring are not listable.
 
@@ -180,6 +183,10 @@ class KeyringBackend:
 
     def __init__(self, *, fallback: SecretBackend | None = None) -> None:
         self._fallback = fallback
+
+    def __repr__(self) -> str:
+        fallback = type(self._fallback).__name__ if self._fallback is not None else None
+        return f"KeyringBackend(fallback={fallback})"
 
     def get(self, app: str, name: str) -> str | None:
         try:

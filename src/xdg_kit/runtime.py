@@ -61,7 +61,7 @@ def _fallback_runtime_root() -> Path:
     """The per-user root under the system temp dir used when ``XDG_RUNTIME_DIR`` is unset:
     ``<tempdir>/xdg-kit-<uid>`` on POSIX (the uid keeps a shared ``/tmp`` from being
     hijacked), ``<tempdir>/xdg-kit`` elsewhere (Windows temp is already per-user)."""
-    tmp = Path(tempfile.gettempdir())
+    system_temp_dir = Path(tempfile.gettempdir())
     if os.name == "posix":
-        return tmp / f"xdg-kit-{os.getuid()}"
-    return tmp / "xdg-kit"
+        return system_temp_dir / f"xdg-kit-{os.getuid()}"
+    return system_temp_dir / "xdg-kit"

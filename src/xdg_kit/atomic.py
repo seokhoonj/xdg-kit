@@ -36,7 +36,12 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
         fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
         temp_path = Path(temp_name)
         try:
-            with os.fdopen(fd, "wb") as handle:
+            try:
+                handle = os.fdopen(fd, "wb")
+            except OSError:
+                os.close(fd)   # fdopen did not adopt the descriptor -- close it ourselves
+                raise
+            with handle:
                 if hasattr(os, "fchmod"):
                     os.fchmod(handle.fileno(), mode)   # POSIX: pin the mode before any bytes land
                 handle.write(data)

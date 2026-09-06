@@ -47,6 +47,9 @@ class FileLock:
         self._handle: IO[str] | None = None
         self.acquired = False
 
+    def __repr__(self) -> str:
+        return f"FileLock(app={self._app!r}, name={self._name!r}, acquired={self.acquired})"
+
     def acquire(self) -> bool:
         """Try to take the lock without blocking. Returns ``True`` if taken, ``False`` if
         another process already holds it. Idempotent while held.
