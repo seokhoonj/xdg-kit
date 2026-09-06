@@ -8,22 +8,22 @@
 **시크릿(비밀값)을 해석하기** — 를 모든 OS에서 똑같은 방식으로 한 번에 처리하는, 작고
 의존성 없는 기반입니다.
 
-- **디렉터리**는 [XDG Base Directory 명세](https://specifications.freedesktop.org/basedir/latest/)
+- **디렉터리**는 [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/)
   (`config` / `data` / `state` / `cache` / `runtime`)를 따르며, 모든 플랫폼에서 `~/.config`
   레이아웃을 사용합니다 — git이 이미 따르는 것과 같은 관례라 머신마다 경로가 동일하고
   별도의 플랫폼 라이브러리가 필요 없습니다.
 - **시크릿**은 정해진 순서로 해석됩니다 — 명시적 값, 그다음 환경변수, 그다음 공유
-  스토어, 마지막으로 앱 자신의 스토어 — 그래서 여러 앱이 공통으로 쓰는 키를 각 앱에
+  저장소, 마지막으로 앱 자신의 저장소 — 그래서 여러 앱이 공통으로 쓰는 키를 각 앱에
   복사하지 않고 **한 곳**에 둘 수 있습니다.
 - **저장**은 기본적으로 0700 디렉터리 안의 mode 0600 `credentials.json` 평문 파일입니다
   (헤드리스 환경과 여러 머신에서 신뢰할 수 있음). OS 키링(keyring)은 파일 자동 폴백이
   딸린 opt-in 백엔드입니다.
 
-## 설치
+## 1. 설치
 
 ```sh
-pip install xdg-kit            # 파일 스토어, 런타임 의존성 0
-pip install "xdg-kit[keyring]" # 선택적 OS 키링 백엔드 추가
+pip install xdg-kit            # 파일 저장소, 런타임 의존성 0
+pip install "xdg-kit[keyring]" # OS 키링(keyring) 사용 시 설치하는 옵션
 ```
 
 설치 확인:
@@ -34,7 +34,7 @@ xdg-kit --version
 
 Python 3.11+ 필요.
 
-## 디렉터리
+## 2. 디렉터리
 
 ```python
 from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
@@ -55,32 +55,38 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 보안된 0700 임시 
 디렉터리 아래에 uid로 키가 매겨진 비공개 디렉터리를 만들어 보안한 뒤 반환합니다
 (`create=False`를 넘기면 생성 없이 경로만 계산).
 
-## 시크릿
+## 3. 시크릿
+
+시크릿(비밀번호, 토큰, API 키)은 **앱 이름별 `credentials.json` 파일 하나**에 담깁니다 --
+`config_dir(app)/credentials.json`, 예를 들어 `myapp` 앱이면 `~/.config/myapp/credentials.json`.
+이 파일 하나가 그 앱의 **저장소**입니다. 어떤 저장소를 읽을지는 앱 이름으로 정해지므로, 한
+앱이 자기 저장소뿐 아니라 다른 앱의 저장소도 이름으로 지정해 함께 읽을 수 있습니다(아래
+**공유 저장소**).
 
 ```python
 from xdg_kit import Credentials, secret, require, set_secret, unset_secret, secret_names
 
-# 해석 순서: override > 환경변수 > 공유 스토어 > 이 앱의 스토어.
+# 해석 순서: override > 환경변수 > 공유 저장소 > 이 앱의 저장소
 creds = Credentials("myapp", shared=["auth"])
-key = creds.require("API_KEY")         # $API_KEY, 그다음 auth 스토어, 그다음 myapp 스토어; 없으면 예외
+key = creds.require("API_KEY")         # $API_KEY, 그다음 auth 저장소, 그다음 myapp 저장소; 없으면 예외
 maybe = creds.secret("API_KEY")        # 같은 해석, 단 없으면 예외 대신 None 반환
-creds.set("API_KEY", value="sk-...")   # myapp 자신의 스토어에 기록 (value는 키워드 전용)
-creds.unset("API_KEY")                 # myapp 스토어에서 삭제 (없으면 무시)
+creds.set("API_KEY", value="sk-...")   # myapp 자신의 저장소에 기록 (value는 키워드 전용)
+creds.unset("API_KEY")                 # myapp 저장소에서 삭제 (없으면 무시)
 creds.names()                          # ["API_KEY", ...] -- 이름만, 값은 절대 반환하지 않음
 
 # 모듈 수준 원샷 편의 함수 (각각 내부에서 Credentials를 구성):
 secret("myapp", "API_KEY")                       # -> str | None
 require("myapp", "API_KEY")                      # -> str, 없으면 CredentialsError
 set_secret("myapp", "API_KEY", value="sk-...")   # value는 키워드 전용
-unset_secret("myapp", "API_KEY")                 # 이 앱의 스토어에서 삭제 (없으면 무시)
+unset_secret("myapp", "API_KEY")                 # 이 앱의 저장소에서 삭제 (없으면 무시)
 secret_names("myapp")                            # -> list[str]
 ```
 
-**공유 스토어**는 여러 앱이 공통으로 쓰는 키의 중복을 없애는 방법입니다. 공유 앱(예:
+**공유 저장소**는 여러 앱이 공통으로 쓰는 키의 중복을 없애는 방법입니다. 공유 앱(예:
 `"auth"`) 하나에 한 번 저장하면, 모든 소비자가 `shared=["auth"]`로 그 키를 해석합니다. 한
-앱에만 특정한 키는 그 앱 자신의 스토어에 남습니다.
+앱에만 특정한 키는 그 앱 자신의 저장소에 남습니다.
 
-## `xdg-kit` 명령
+## 4. `xdg-kit` 명령
 
 각 패키지마다 다른 키 저장 방식을 익힐 필요 없이, 어떤 앱의 시크릿이든 한 곳에서 한
 형식으로 관리합니다:
@@ -102,29 +108,49 @@ xdg-kit doctor myapp other-app          # 지정한 앱만 점검
 `set`, `get`, `list`, `unset`은 `--keyring`을 받아 OS 키링 백엔드로 동작합니다(파일 자동
 폴백 포함). 종료 코드: `0` 성공, `1` 런타임 오류, `2` 사용법 오류(잘못된 앱 이름).
 
-## 키링
+## 5. 키링
 
-파일 스토어가 기본인 이유는 어디서나 신뢰할 수 있기 때문입니다 — 헤드리스 서버, cron,
-컨테이너, 여러 머신. OS 키링은 opt-in입니다:
+비밀번호나 API 키 같은 시크릿은 두 곳 중 하나에 저장할 수 있습니다:
+
+- **파일 저장소**(기본) — 앱 폴더의 `credentials.json`. 어디서나 확실히 동작하지만, 값이
+  평문(그대로 보이는 형태)으로 들어갑니다.
+- **OS 키링**(옵션) — OS가 제공하는 암호화 금고(맥 Keychain, 리눅스 GNOME Keyring 등). 더
+  안전하지만, 화면 없는 서버 · cron 예약 실행 · 컨테이너처럼 키링이 없거나 잠긴 곳에서는
+  쓸 수 없습니다.
+
+기본을 파일로 둔 건 "어디서나 된다"는 신뢰성 때문입니다. 키링을 쓰려면 직접 켜야 합니다:
 
 ```python
 from xdg_kit.backends import FileBackend, KeyringBackend, default_backend
 from xdg_kit import Credentials
 
-backend = KeyringBackend(fallback=FileBackend())   # 데스크톱에선 키링, 서버에선 파일
+backend = KeyringBackend(fallback=FileBackend())   # 키링을 쓰되, 안 될 때는 파일로
 creds = Credentials("myapp", backend=backend)
-# 또는: default_backend(use_keyring=True) -- 동일한 것
+# 또는: default_backend(use_keyring=True) -- 같은 뜻
 ```
 
-키링 백엔드가 없으면 작업은 자동으로 파일 스토어로 폴백되고 일회성 경고가 출력되므로,
-키링을 선택한 사용자가 자기 시크릿이 대신 파일에 있음을 알게 됩니다. 키링이 동작할 때는
-키링이 권위(authoritative)를 가지며, 성공한 `set` / `unset`은 파일에 남은 낡은 평문 복사본도
-지워서 키링을 선택한 뒤 파일 복사본이 남지 않게 합니다. 단 한 방향은 닫을 수 없습니다:
-키링이 *다운된 동안* 파일에 기록된 값은 복구 시 키링으로 다시 이관되지 않으므로, 낡은
-키링 값이 새 값을 가리는 일을 피하려면, 키링이 닿는 동안 키를 교체하세요(또는 낡은 키링
-항목을 지우세요).
+이렇게 켜면 xdg-kit은 이렇게 동작합니다.
 
-## 로그에서 시크릿 가리기
+- **평소(키링이 열려 있을 때)**: 값은 키링에 저장되고, 그 값에 대한 권한을 키링이 가집니다
+  — 파일에도 같은 키가 있으면 키링 값이 이깁니다. `set` / `unset`이 성공하면 파일에 남아
+  있던 예전 평문 복사본까지 지워서, 키링으로 옮긴 뒤 파일에 사본이 남지 않게 합니다.
+- **키링을 쓸 수 없을 때(설치 안 됨 · 잠김 · 서버라 키링이 없음)**: 작업이 자동으로 파일
+  저장소로 물러납니다(폴백 -- 대비책으로 내려감). 이때 경고가 한 번 떠서, 키링을 켠
+  사용자가 "지금 값이 키링이 아니라 파일에 저장됐다"는 걸 알 수 있습니다.
+
+**주의할 점 하나** -- 반대 방향은 자동으로 정리되지 않습니다. 키링을 쓸 수 없던 동안 파일에
+저장된 값은, 나중에 키링이 다시 열려도 키링으로 자동으로 옮겨지지 않습니다. 그래서 키링에
+예전 값이 그대로 남아 있으면, 읽을 때 키링을 먼저 보기 때문에 그 예전 값이 새 값을
+가려버립니다. 확실한 해결은 **키링이 열려 있을 때 키를 다시 설정(set)하는 것**입니다 -- 그러면
+새 값이 곧장 키링으로 들어가고 파일에 남은 낡은 사본도 지워집니다. `xdg-kit unset --keyring`으로
+예전 키링 항목을 지워서 고치려 하지 *마세요*: 키링이 열려 있는 동안에는 그 명령이 파일에 있던
+새 사본까지 함께 지워 값을 잃습니다.
+
+## 6. 로그에서 시크릿 가리기
+
+API는 종종 에러 메시지나 요청 URL 안에 당신의 키를 그대로 되돌려줍니다. 그래서 안 가린
+예외를 그냥 로그에 남기면, 실패에 쓰인 바로 그 시크릿이 로그 파일이나 터미널로 새어 나갈 수
+있습니다. 이 함수들은 로그로 내보내기 전에 알려진 시크릿 값을 `***`로 바꿉니다.
 
 ```python
 from xdg_kit.scrub import scrub_secrets, scrub_exception
@@ -137,7 +163,12 @@ raise scrub_exception(err, [key])               # __cause__/__context__ 체인 �
 다시 씁니다. 커스텀 `__str__`을 가진 예외라면 렌더된 로그 줄도 `scrub_secrets`에 함께
 통과시키세요.
 
-## 단일 인스턴스 잠금
+## 7. 단일 인스턴스 잠금
+
+같은 작업이 자기 자신의 다른 복사본과 겹쳐 도는 것을 막습니다 — cron 두 개, 또는 cron과
+수동 실행이 겹칠 때. 그러면 같은 일을 두 번 하고, 같은 출력이 중복으로 나가고(중복 전송,
+중복 레코드), 공유 상태에서 경쟁(race)이 생깁니다(두 실행이 한 파일을 동시에 써서 깨뜨림).
+`FileLock`은 나중 실행이 "이미 하나가 돌고 있음"을 감지해, 몰리지 않고 건너뛰게 해줍니다.
 
 ```python
 from xdg_kit.locking import FileLock, single_instance
@@ -158,7 +189,7 @@ if lock.acquire():
 잠금은 `runtime_dir`에 위치하며 프로세스가 종료될 때 — 크래시가 나더라도 — OS가
 해제합니다.
 
-## 공개 API 레퍼런스
+## 8. 공개 API 레퍼런스
 
 | Import | 무엇인가 |
 |--------|----------|
@@ -175,7 +206,7 @@ if lock.acquire():
 | `app_dir_segment` (`xdg_kit.paths`) | 앱 이름을 안전한 경로 세그먼트로 검증. |
 | `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | 예외 계층. |
 
-## 라이브러리 작성자를 위해
+## 9. 라이브러리 작성자를 위해
 
 xdg-kit은 기반 계층만 제공합니다 — 디렉터리, 시크릿 해석, 권한, 원자적 쓰기, 잠금,
 스크러빙. 당신의 패키지는 자기 도메인 설정(계정, 라우트, 토픽)을 그대로 유지하면서 그
@@ -191,6 +222,6 @@ def api_key() -> str:
     return Credentials("yourapp").require("YOURAPP_API_KEY")
 ```
 
-## 라이선스
+## 10. 라이선스
 
 MIT

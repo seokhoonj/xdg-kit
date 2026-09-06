@@ -20,7 +20,7 @@ way, on every OS.
   (reliable headless and across machines); the OS keyring is an opt-in backend with
   automatic file fallback.
 
-## Install
+## 1. Install
 
 ```sh
 pip install xdg-kit            # file store, zero runtime dependencies
@@ -35,7 +35,7 @@ xdg-kit --version
 
 Requires Python 3.11+.
 
-## Directories
+## 2. Directories
 
 ```python
 from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
@@ -55,12 +55,12 @@ specified default; when `XDG_RUNTIME_DIR` is unset (cron, containers, macOS, Win
 creates and secures a private uid-keyed directory under the system temp dir, as the spec
 directs, and returns it (pass `create=False` to compute the path without creating it).
 
-## Secrets
+## 3. Secrets
 
 ```python
 from xdg_kit import Credentials, secret, require, set_secret, unset_secret, secret_names
 
-# Resolution order: override > environment > shared stores > this app's store.
+# Resolution order: override > environment > shared stores > this app's store
 creds = Credentials("myapp", shared=["auth"])
 key = creds.require("API_KEY")         # env $API_KEY, then auth's store, then myapp's; raises if unset
 maybe = creds.secret("API_KEY")        # same, but returns None instead of raising
@@ -80,7 +80,7 @@ The **shared store** is how a key common to several apps stops being duplicated:
 once under a shared app (say `"auth"`), and every consumer resolves it with
 `shared=["auth"]`. A key specific to one app stays in that app's own store.
 
-## The `xdg-kit` command
+## 4. The `xdg-kit` command
 
 Manage any app's secrets from one place, in one format — no need to learn each package's
 own way to store a key:
@@ -103,30 +103,52 @@ xdg-kit doctor myapp other-app          # check only the named apps
 (with automatic file fallback). Exit codes: `0` success, `1` a runtime error, `2` a usage
 error (an invalid app name).
 
-## Keyring
+## 5. Keyring
 
-The file store is the default because it is reliable everywhere — headless servers, cron,
-containers, and multiple machines. The OS keyring is opt-in:
+Secrets — passwords, tokens, API keys — can live in one of two places:
+
+- **File store** (the default) — a `credentials.json` in the app's folder. Works reliably
+  everywhere, but stores the value in plaintext.
+- **OS keyring** (opt-in) — the OS-provided encrypted vault (macOS Keychain, GNOME Keyring,
+  etc.). More secure, but unavailable where no keyring exists or it is locked: headless
+  servers, cron jobs, containers.
+
+The file store is the default because it works everywhere. To use the keyring, turn it on
+explicitly:
 
 ```python
 from xdg_kit.backends import FileBackend, KeyringBackend, default_backend
 from xdg_kit import Credentials
 
-backend = KeyringBackend(fallback=FileBackend())   # keyring on a desktop, file on a server
+backend = KeyringBackend(fallback=FileBackend())   # keyring when available, else the file
 creds = Credentials("myapp", backend=backend)
 # or: default_backend(use_keyring=True) -- the same thing
 ```
 
-When no keyring backend is present, the operation falls back to the file store
-automatically and a one-time warning is printed, so a user who opted into the keyring
-learns their secrets are in the file instead. When the keyring works it is authoritative,
-and a successful `set` / `unset` also clears any stale plaintext copy from the file, so
-opting into the keyring never leaves a file copy behind. One direction cannot be closed: a
-value written to the file while the keyring is *down* is not migrated back into the keyring
-on recovery, so rotate a key while the keyring is reachable (or clear the stale keyring
-entry) to avoid an older keyring value shadowing it.
+With the keyring turned on, xdg-kit behaves like this:
 
-## Redacting secrets from logs
+- **Normally (keyring reachable)**: the value is stored in the keyring, and the keyring holds
+  authority over it — if the file also has the same key, the keyring value wins. A successful
+  `set` / `unset` also clears any stale plaintext copy from the file, so switching to the
+  keyring never leaves a file copy behind.
+- **When the keyring can't be used (not installed, locked, or absent on a server)**: the
+  operation falls back to the file store automatically, and a one-time warning is printed, so
+  a user who turned the keyring on learns the value went to the file instead.
+
+**One caveat** — the reverse direction is not reconciled automatically. A value written to
+the file while the keyring was unavailable is *not* migrated back into the keyring once it
+recovers. So if the keyring still holds an older value for that key, a read hits the keyring
+first and that older value shadows the newer one in the file. The reliable fix is to
+**re-set the key while the keyring is reachable** — the new value then goes straight into the
+keyring and the stale file copy is cleared. Do *not* try to fix it by deleting the keyring
+entry with `xdg-kit unset --keyring`: while the keyring is reachable that also deletes the
+newer file copy, losing the value.
+
+## 6. Redacting secrets from logs
+
+An API often echoes your key back inside an error message or a request URL, so logging an
+unscrubbed exception can leak the very secret it failed with into a log file or your terminal.
+These helpers replace known secret values with `***` before anything is logged or surfaced.
 
 ```python
 from xdg_kit.scrub import scrub_secrets, scrub_exception
@@ -139,7 +161,12 @@ raise scrub_exception(err, [key])               # scrubs the whole __cause__/__c
 attribute; for an exception with a custom `__str__`, also pass the rendered log line
 through `scrub_secrets`.
 
-## Single-instance locking
+## 7. Single-instance locking
+
+Stop a job from overlapping with another copy of itself — two cron runs, or a cron run and a
+manual one. Such runs redo the same work, produce duplicate output (double sends,
+duplicate rows), and race on shared state (two writers corrupting one file); a `FileLock`
+lets the later run detect that one is already in progress and skip rather than pile on.
 
 ```python
 from xdg_kit.locking import FileLock, single_instance
@@ -160,7 +187,7 @@ if lock.acquire():
 The lock lives in `runtime_dir` and is released by the OS when the process exits, even on a
 crash.
 
-## Public API reference
+## 8. Public API reference
 
 | Import | What it is |
 |--------|------------|
@@ -177,7 +204,7 @@ crash.
 | `app_dir_segment` (`xdg_kit.paths`) | Validate an app name as a safe path segment. |
 | `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | The exception hierarchy. |
 
-## For library authors
+## 9. For library authors
 
 `xdg-kit` provides only the base layer — directories, secret resolution, permissions,
 atomic writes, locking, and scrubbing. Your package keeps its own domain configuration
@@ -193,6 +220,6 @@ def api_key() -> str:
     return Credentials("yourapp").require("YOURAPP_API_KEY")
 ```
 
-## License
+## 10. License
 
 MIT
