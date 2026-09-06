@@ -85,3 +85,18 @@ def test_scrub_exception_survives_non_iterable_secrets():
     err = ValueError("sk-secret")
     result = scrub_exception(err, None)   # type: ignore[arg-type]  # must not raise
     assert result is err
+
+
+def test_scrub_exception_walks_context_chain():
+    # an implicit __context__ (a raise inside an except, without `from`) is a separate edge
+    # from __cause__ and must also be scrubbed
+    try:
+        try:
+            raise ValueError("inner sk-secret")
+        except ValueError:
+            raise RuntimeError("outer sk-secret")   # noqa: B904 -- implicit __context__ is the point
+    except RuntimeError as err:
+        scrub_exception(err, ["sk-secret"])
+        assert err.__context__ is not None
+        assert "sk-secret" not in str(err)
+        assert "sk-secret" not in str(err.__context__)

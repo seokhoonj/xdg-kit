@@ -61,3 +61,15 @@ def test_replace_failure_cleans_up_and_leaves_target(tmp_path, monkeypatch):
         write_text_atomic(target, "new")
     assert target.read_text() == "old"            # original untouched
     assert list(tmp_path.glob("*.tmp")) == []     # no secret-bearing temp debris left
+
+
+def test_fdopen_failure_wraps_and_cleans_up(tmp_path, monkeypatch):
+    # if os.fdopen never adopts the mkstemp fd, the raw fd must be closed (no leak) and the
+    # temp file removed; the failure surfaces as XdgKitError
+    def boom(fd, *args, **kwargs):
+        raise OSError("fdopen failed")
+
+    monkeypatch.setattr("xdg_kit.atomic.os.fdopen", boom)
+    with pytest.raises(XdgKitError):
+        write_bytes_atomic(tmp_path / "f", b"data")
+    assert list(tmp_path.glob("*.tmp")) == []

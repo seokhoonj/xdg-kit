@@ -82,3 +82,16 @@ def test_repr_is_secret_safe():
     text = repr(creds)
     assert "nw" in text and "auth" in text and "FileBackend" in text
     assert "super-secret-value" not in text
+
+
+def test_blank_value_falls_through_each_tier(monkeypatch):
+    # a blank (whitespace-only) value at any tier reads as absent and falls through to the
+    # next: override -> env -> shared -> app.
+    set_secret("auth", "K", value="   ")        # blank in the shared store
+    set_secret("nw", "K", value="from-app")     # real value in the app's own store
+    creds = Credentials("nw", shared=["auth"])
+    # blank override skipped, env unset, blank shared skipped -> the app value wins
+    assert creds.secret("K", override="   ") == "from-app"
+    # a blank environment value also falls through (env unset would too)
+    monkeypatch.setenv("K", "   ")
+    assert creds.secret("K") == "from-app"

@@ -352,3 +352,18 @@ def test_default_backend_is_file():
 
 def test_default_backend_keyring_is_keyring():
     assert isinstance(default_backend(use_keyring=True), KeyringBackend)
+
+
+def test_keyring_import_absent_falls_back_for_all_ops_and_warns_once(monkeypatch, capsys):
+    """When the keyring package cannot even be imported, get/set/unset all route to the file
+    fallback (exercising unset's ImportError branch) and the downgrade warning prints once."""
+    monkeypatch.setitem(sys.modules, "keyring", None)   # `import keyring` -> ImportError
+    monkeypatch.setattr("xdg_kit.backends._warned_keyring_fallback", False)
+    fb = FileBackend()
+    kb = KeyringBackend(fallback=fb)
+    kb.set("nw", "K", value="v")            # -> file
+    assert kb.get("nw", "K") == "v"         # <- file
+    kb.unset("nw", "K")                     # -> file (ImportError branch of unset)
+    assert kb.get("nw", "K") is None
+    assert fb.get("nw", "K") is None
+    assert capsys.readouterr().err.count("keyring unavailable") == 1   # warn-once holds

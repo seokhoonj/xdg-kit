@@ -105,3 +105,17 @@ def test_restrict_dir_to_owner_allows_symlinked_dir(tmp_path):
     link.symlink_to(real)
     restrict_dir_to_owner(link)   # a synced-folder symlink must be honoured, not rejected
     assert link.is_dir()
+
+
+def test_guards_are_no_ops_on_non_posix(tmp_path, monkeypatch, capsys):
+    """On a non-POSIX OS the mode bits do not apply: ensure_private_dir just creates the
+    directory, and the readability warning stays silent."""
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    target = tmp_path / "rt"
+    assert ensure_private_dir(target) == target
+    assert target.is_dir()
+    secret = tmp_path / "credentials.json"
+    secret.write_text("{}")
+    warn_if_group_or_world_readable(secret, app="nw")   # no permission bits to check
+    assert capsys.readouterr().err == ""

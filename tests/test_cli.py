@@ -127,3 +127,11 @@ def test_doctor_reports_count(capsys):
 def test_bad_app_name_is_usage_error(capsys):
     assert main(["path", "../evil"]) == 2
     assert "error" in capsys.readouterr().err
+
+
+def test_doctor_discovers_apps_when_none_named(capsys):
+    main(["set", "appone", "K", "--value", "v"])
+    main(["set", "apptwo", "K", "--value", "v"])
+    capsys.readouterr()
+    assert main(["doctor"]) == 0                       # no app args -> discover them
+    assert "checked 2" in capsys.readouterr().out

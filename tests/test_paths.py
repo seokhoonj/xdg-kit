@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from xdg_kit.errors import XdgKitError
 from xdg_kit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
 
 
@@ -67,3 +68,25 @@ def test_absolute_xdg_value_is_expanded(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdgdata"))
     assert data_dir("nw") == tmp_path / "xdgdata" / "nw"
     assert isinstance(config_dir("nw"), Path)
+
+
+def test_blank_xdg_value_is_ignored(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", "   ")   # whitespace-only reads as unset
+    assert config_dir("nw") == tmp_path / "home" / ".config" / "nw"
+
+
+def test_per_app_state_dir_override_wins_and_is_used_as_is(monkeypatch, tmp_path):
+    elsewhere = tmp_path / "vol" / "state"
+    monkeypatch.setenv("NW_STATE_DIR", str(elsewhere))
+    assert state_dir("nw") == elsewhere   # no app segment appended
+
+
+def test_no_home_and_no_xdg_raises_xdg_kit_error(monkeypatch):
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+
+    def no_home(*args, **kwargs):
+        raise RuntimeError("no home directory")
+
+    monkeypatch.setattr(Path, "home", no_home)
+    with pytest.raises(XdgKitError):
+        config_dir("nw")
