@@ -100,10 +100,10 @@ def test_file_concurrent_set_no_lost_update():
             errors.append(err)
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
     assert not errors
     assert fb.names("nw") == [f"KEY_{i:03d}" for i in range(n)]
@@ -132,20 +132,57 @@ def test_file_concurrent_process_set_no_lost_update():
         ctx.Process(target=_process_set_worker, args=(f"KEY_{i:03d}", f"v{i}"))
         for i in range(n)
     ]
-    for p in procs:
-        p.start()
-    for p in procs:
-        p.join(timeout=30)
-    for p in procs:
-        if p.is_alive():
-            p.terminate()   # never orphan a hung child still holding the flock
-            p.join()
+    for process in procs:
+        process.start()
+    for process in procs:
+        process.join(timeout=30)
+    for process in procs:
+        if process.is_alive():
+            process.terminate()   # never orphan a hung child still holding the flock
+            process.join()
 
-    assert all(p.exitcode == 0 for p in procs)
+    assert all(process.exitcode == 0 for process in procs)
     fb = FileBackend()
     assert fb.names("nw") == [f"KEY_{i:03d}" for i in range(n)]
     for i in range(n):
         assert fb.get("nw", f"KEY_{i:03d}") == f"v{i}"
+
+
+def _process_unset_worker(key: str) -> None:
+    """Unset one key in the shared store from a separate process -- exercises the sibling
+    ``.lock`` OS lock on the unset read-modify-write, not the per-process thread lock."""
+    from xdg_kit.backends import FileBackend
+
+    FileBackend().unset("nw", key)
+
+
+@posix_only
+def test_file_concurrent_process_set_and_unset_keeps_expected_keys():
+    """The cross-process set test cannot see a missing lock on unset: seed keys, then from
+    separate PROCESSES concurrently add new keys and remove the seeded ones. The store must
+    end with exactly the new keys -- proving unset takes the same OS lock set does."""
+    import multiprocessing as mp
+
+    n = 20
+    fb = FileBackend()
+    for i in range(n):
+        fb.set("nw", f"OLD_{i:03d}", value=f"o{i}")   # seed keys the deleters will remove
+
+    ctx = mp.get_context("fork")   # fork so children inherit the test's XDG_CONFIG_HOME
+    setters = [ctx.Process(target=_process_set_worker, args=(f"NEW_{i:03d}", f"n{i}")) for i in range(n)]
+    unsetters = [ctx.Process(target=_process_unset_worker, args=(f"OLD_{i:03d}",)) for i in range(n)]
+    procs = setters + unsetters
+    for process in procs:
+        process.start()
+    for process in procs:
+        process.join(timeout=30)
+    for process in procs:
+        if process.is_alive():
+            process.terminate()   # never orphan a hung child still holding the flock
+            process.join()
+
+    assert all(process.exitcode == 0 for process in procs)
+    assert FileBackend().names("nw") == [f"NEW_{i:03d}" for i in range(n)]
 
 
 def test_file_concurrent_set_and_unset_keeps_expected_keys():
@@ -177,10 +214,10 @@ def test_file_concurrent_set_and_unset_keeps_expected_keys():
 
     threads = [threading.Thread(target=setter, args=(i,)) for i in range(n)]
     threads += [threading.Thread(target=unsetter, args=(i,)) for i in range(n)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
     assert not errors
     assert fb.names("nw") == [f"NEW_{i:03d}" for i in range(n)]   # all olds gone, all news kept
@@ -189,7 +226,7 @@ def test_file_concurrent_set_and_unset_keeps_expected_keys():
 def test_file_set_write_failure_raises_credentials_error(monkeypatch):
     """The atomic layer raises XdgKitError; FileBackend.set must honour its documented
     CredentialsError contract by converting it."""
-    def boom(*a, **k):
+    def boom(*args, **kwargs):
         raise XdgKitError("disk full")
 
     monkeypatch.setattr("xdg_kit.backends.write_text_atomic", boom)
@@ -260,11 +297,14 @@ def test_keyring_value_wins_over_conflicting_fallback(working_keyring):
     assert kb.get("nw", "K") == "keyring-val"       # keyring is authoritative
 
 
-def test_keyring_none_when_working_but_absent_ignores_fallback(working_keyring):
+def test_keyring_miss_consults_fallback_so_outage_written_value_survives(working_keyring):
+    # A value written to the file while the keyring was down must stay readable once the
+    # keyring recovers empty: get() consults the fallback on a clean keyring miss rather than
+    # hiding it. The keyring holds no conflicting entry here, so it stays authoritative.
     fb = FileBackend()
     kb = KeyringBackend(fallback=fb)
-    fb.set("nw", "K", value="stale-file-val")   # keyring empty, file has a stale value
-    assert kb.get("nw", "K") is None            # working keyring returns None -> None, no fallback
+    fb.set("nw", "K", value="written-during-outage")   # keyring empty, file has the value
+    assert kb.get("nw", "K") == "written-during-outage"
 
 
 def test_keyring_set_clears_stale_file_copy(working_keyring):
@@ -274,6 +314,21 @@ def test_keyring_set_clears_stale_file_copy(working_keyring):
     kb.set("nw", "K", value="new-keyring")
     assert fb.get("nw", "K") is None            # plaintext copy removed
     assert working_keyring[("nw", "K")] == "new-keyring"
+
+
+def test_keyring_set_success_but_file_cleanup_failure_reports_partial_success(working_keyring, monkeypatch):
+    # keyring write succeeded; if clearing the stale file copy then fails, the error must say
+    # the secret IS stored in the keyring (partial success), not read as a total failure
+    fb = FileBackend()
+    kb = KeyringBackend(fallback=fb)
+
+    def boom(app, name):
+        raise CredentialsError("file is malformed")
+
+    monkeypatch.setattr(fb, "unset", boom)
+    with pytest.raises(CredentialsError, match="stored .* in the keyring"):
+        kb.set("nw", "K", value="v")
+    assert working_keyring[("nw", "K")] == "v"   # the authoritative keyring write did happen
 
 
 def test_keyring_unset_clears_file_copy_so_no_resurrection(working_keyring):
@@ -311,7 +366,7 @@ def test_keyring_falls_back_when_unavailable(monkeypatch, capsys):
     with a one-time stderr warning about the downgrade."""
     mod: Any = types.ModuleType("keyring")
 
-    def boom(*a, **k):
+    def boom(*args, **kwargs):
         raise RuntimeError("no keyring backend")
 
     mod.get_password = boom
@@ -329,7 +384,7 @@ def test_keyring_falls_back_when_unavailable(monkeypatch, capsys):
 def test_keyring_without_fallback_raises_when_unavailable(monkeypatch):
     mod: Any = types.ModuleType("keyring")
 
-    def boom(*a, **k):
+    def boom(*args, **kwargs):
         raise RuntimeError("no keyring backend")
 
     mod.get_password = boom

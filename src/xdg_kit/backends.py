@@ -84,7 +84,7 @@ class FileBackend:
             CredentialsError: the file exists but is unreadable, not JSON, or not a JSON
                 object.
         """
-        return _clean(self._load(app).get(name))
+        return _normalize_secret_value(self._load(app).get(name))
 
     def set(self, app: str, name: str, *, value: str) -> None:
         """Store ``value`` under ``name``, creating or updating the file at mode 0600 in a
@@ -173,12 +173,14 @@ class KeyringBackend:
     service's keys, so ``names`` reports only what the ``fallback`` holds -- keys stored
     solely in the OS keyring are not listable.
 
-    One direction cannot be closed: a value written to the file fallback *while the keyring
-    is down* is not migrated into the keyring on recovery. If the keyring still holds an
-    older value for that name, it will shadow the newer file value once it comes back (the
-    keyring is authoritative). Re-set the key while the keyring is reachable so the new value
-    lands in the keyring; do not try to fix it by deleting the keyring entry -- an ``unset``
-    while the keyring works also clears the file copy, losing the newer value.
+    One direction cannot be fully closed: a value written to the file fallback *while the
+    keyring is down* is not migrated into the keyring on recovery. If on recovery the keyring
+    holds *no* entry for that name, ``get`` consults the file and returns it, so the value is
+    not lost; but if the keyring still holds an *older* value for that name, that older value
+    shadows the newer file value (the keyring is authoritative on a conflict). Re-set the key
+    while the keyring is reachable so the new value lands in the keyring; do not try to fix it
+    by deleting the keyring entry -- an ``unset`` while the keyring works also clears the file
+    copy, losing the newer value.
     """
 
     def __init__(self, *, fallback: SecretBackend | None = None) -> None:
@@ -189,6 +191,18 @@ class KeyringBackend:
         return f"KeyringBackend(fallback={fallback})"
 
     def get(self, app: str, name: str) -> str | None:
+        """Return the keyring value for ``name``, or ``None`` when it is set nowhere.
+
+        Falls back to the file store in two cases: when the keyring is unavailable (any
+        failure -- missing package, locked or broken backend), warning once; and when the
+        keyring is reachable but holds no entry, so a value written to the file while the
+        keyring was down (see the class note on one-way reconciliation) stays readable after
+        the keyring recovers instead of being silently hidden.
+
+        Raises:
+            CredentialsError: the keyring is unavailable and no fallback is configured, or a
+                consulted fallback file is present but unreadable or malformed.
+        """
         try:
             import keyring
             value = keyring.get_password(app, name)
@@ -198,20 +212,56 @@ class KeyringBackend:
             # fully knowable, so the catch is deliberately broad -- unlike unset, which fails
             # closed because reporting a delete that did not happen would strand a live secret.
             return self._fallback_get(app, name, err)
-        return _clean(value)
+        cleaned = _normalize_secret_value(value)
+        if cleaned is not None:
+            return cleaned
+        # Keyring reachable but empty for this name: a value may have been written to the file
+        # while the keyring was down (_fallback_set), which the keyring never learned. Consult
+        # the fallback so that value is not silently hidden once the keyring is back. The
+        # keyring stays authoritative on conflicts -- a successful keyring set/unset always
+        # clears the file copy, so the file can only hold what the keyring genuinely lacks.
+        if self._fallback is not None:
+            return self._fallback.get(app, name)
+        return None
 
     def set(self, app: str, name: str, *, value: str) -> None:
+        """Store ``value`` under ``name`` in the keyring; a successful write also clears any
+        stale plaintext copy from the fallback file. Falls back to the file store (warning
+        once) when the keyring is unavailable.
+
+        Raises:
+            CredentialsError: the keyring is unavailable and no fallback is configured; or the
+                keyring write succeeded but a stale file copy could not be cleared.
+        """
         try:
             import keyring
             keyring.set_password(app, name, value)
         except Exception as err:
             self._fallback_set(app, name, value, err)
             return
-        # keyring is authoritative: drop any stale plaintext copy from the fallback file.
+        # keyring is authoritative: drop any stale plaintext copy from the fallback file. The
+        # keyring write already succeeded; if clearing the file copy fails, say so loudly (a
+        # plaintext copy may remain) without hiding that the secret IS stored.
         if self._fallback is not None:
-            self._fallback.unset(app, name)
+            try:
+                self._fallback.unset(app, name)
+            except CredentialsError as err:
+                raise CredentialsError(
+                    f"stored {app}/{name} in the keyring, but a stale plaintext copy may "
+                    f"remain in the file store and could not be cleared: {err}"
+                ) from err
 
     def unset(self, app: str, name: str) -> None:
+        """Remove ``name`` from the keyring and from any fallback file copy; a no-op when
+        absent. Fails closed: a keyring present but erroring on delete raises rather than
+        silently reporting a delete that may not have happened.
+
+        Raises:
+            CredentialsError: the keyring is present but the delete failed (a locked or broken
+                store); or the delete succeeded but a stale file copy could not be cleared.
+                When no keyring backend exists at all, the deletion is delegated to the
+                fallback (which raises only if its file is malformed).
+        """
         try:
             import keyring
             import keyring.errors
@@ -233,11 +283,24 @@ class KeyringBackend:
                 f"could not delete {app}/{name} from the keyring: {err}"
             ) from err
         # deletion succeeded (or the key was absent): also clear any file copy so a later
-        # keyring outage cannot resurrect it.
+        # keyring outage cannot resurrect it. The keyring delete already succeeded; if
+        # clearing the file copy fails, say so loudly without hiding that fact.
         if self._fallback is not None:
-            self._fallback.unset(app, name)
+            try:
+                self._fallback.unset(app, name)
+            except CredentialsError as err:
+                raise CredentialsError(
+                    f"deleted {app}/{name} from the keyring, but a stale plaintext copy may "
+                    f"remain in the file store and could not be cleared: {err}"
+                ) from err
 
     def names(self, app: str) -> list[str]:
+        """The fallback file's stored key names, sorted -- never the values. The OS keyring
+        cannot enumerate its own keys, so a key stored solely in the keyring is not listed.
+
+        Raises:
+            CredentialsError: the fallback file is present but unreadable or malformed.
+        """
         # keyring cannot enumerate; report only the fallback's file-stored names.
         return self._fallback.names(app) if self._fallback is not None else []
 
@@ -286,7 +349,7 @@ def _warn_keyring_fallback_once(err: Exception) -> None:
     )
 
 
-def _clean(value: object) -> str | None:
+def _normalize_secret_value(value: object) -> str | None:
     """A stored value normalised to a non-empty string, or ``None`` -- so a blank entry
     reads as absent and falls through to the next resolution tier."""
     return value.strip() if isinstance(value, str) and value.strip() else None
@@ -307,18 +370,18 @@ def _clean(value: object) -> str | None:
 # One lock per distinct store path, kept for the process lifetime. The registry is bounded
 # by the number of stores a process touches (a handful), not by call volume, so a plain dict
 # is right here -- eviction would buy nothing worth the machinery.
-_store_thread_locks: dict[str, threading.Lock] = {}
-_store_thread_locks_guard = threading.Lock()
+_thread_lock_by_store_path: dict[str, threading.Lock] = {}
+_thread_lock_registry_guard = threading.Lock()
 
 
-def _thread_lock_for(key: str) -> threading.Lock:
-    """The process-wide lock for the store at ``key``, created on first use. Serializes two
-    threads of one process, which an OS file lock alone does not guarantee everywhere."""
-    with _store_thread_locks_guard:
-        lock = _store_thread_locks.get(key)
+def _thread_lock_for(store_path: str) -> threading.Lock:
+    """The process-wide lock for the store at ``store_path``, created on first use. Serializes
+    two threads of one process, which an OS file lock alone does not guarantee everywhere."""
+    with _thread_lock_registry_guard:
+        lock = _thread_lock_by_store_path.get(store_path)
         if lock is None:
             lock = threading.Lock()
-            _store_thread_locks[key] = lock
+            _thread_lock_by_store_path[store_path] = lock
         return lock
 
 

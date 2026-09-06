@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from typing import IO
 
 from xdg_kit._oslock import lock_exclusive, unlock
+from xdg_kit.errors import XdgKitError
 from xdg_kit.paths import app_dir_segment
 from xdg_kit.runtime import runtime_dir
 
@@ -55,13 +56,18 @@ class FileLock:
         another process already holds it. Idempotent while held.
 
         Raises:
-            XdgKitError / InsecureStorageError: the runtime directory could not be created
-                or secured (propagated from ``runtime_dir``).
+            XdgKitError: the lock file could not be opened, or (propagated from
+                ``runtime_dir``) the runtime directory could not be created.
+            InsecureStorageError: the runtime directory exists but is unsafe (propagated
+                from ``runtime_dir``).
         """
         if self.acquired:
             return True
         path = runtime_dir(self._app) / f"{self._name}.lock"
-        handle = path.open("a+")   # a+ suits both flock and msvcrt; never truncates a holder's file
+        try:
+            handle = path.open("a+")   # a+ suits both flock and msvcrt; never truncates a holder's file
+        except OSError as err:
+            raise XdgKitError(f"could not open lock file {path}: {err}") from err
         if not lock_exclusive(handle, blocking=False):
             handle.close()
             return False   # another process holds it

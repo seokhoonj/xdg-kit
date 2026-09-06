@@ -87,6 +87,18 @@ def test_scrub_exception_survives_non_iterable_secrets():
     assert result is err
 
 
+def test_scrub_survives_secrets_iterator_that_raises_mid_iteration():
+    # a secrets iterator can yield one value and then raise while an error is already being
+    # handled; both entry points must swallow that and never propagate on the error path
+    def secrets_then_boom():
+        yield "sk-secret"
+        raise RuntimeError("iterator blew up mid-iteration")
+
+    assert scrub_secrets("has sk-secret", secrets_then_boom()) == "has sk-secret"
+    err = ValueError("sk-secret here")
+    assert scrub_exception(err, secrets_then_boom()) is err
+
+
 def test_scrub_exception_walks_context_chain():
     # an implicit __context__ (a raise inside an except, without `from`) is a separate edge
     # from __cause__ and must also be scrubbed

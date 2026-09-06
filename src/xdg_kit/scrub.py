@@ -70,7 +70,7 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
             try:
                 stack.append(getattr(node, attr, None))
             except Exception:
-                pass
+                pass   # a custom exception's attribute access may raise; never on the error path
     return err
 
 
@@ -84,10 +84,10 @@ def _scrub_node(node: BaseException, secret_values: list[str]) -> None:
                 scrub_secrets(arg, secret_values) if isinstance(arg, str) else arg for arg in args
             )
     except Exception:
-        pass
+        pass   # a custom .args accessor may raise; the never-raise contract wins here
     try:
         url = getattr(node, "url", None)
         if isinstance(url, str):
             node.url = scrub_secrets(url, secret_values)   # type: ignore[attr-defined]
     except Exception:
-        pass
+        pass   # a custom .url property (httpx) may raise; the never-raise contract wins here

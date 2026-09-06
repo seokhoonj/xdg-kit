@@ -73,3 +73,50 @@ def test_fdopen_failure_wraps_and_cleans_up(tmp_path, monkeypatch):
     with pytest.raises(XdgKitError):
         write_bytes_atomic(tmp_path / "f", b"data")
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_body_failure_cleans_up_temp(tmp_path, monkeypatch):
+    # a failure after the temp file is opened (here fsync, standing in for any mid-write I/O
+    # error) must still remove the secret-bearing temp file and surface as XdgKitError
+    def boom(fd):
+        raise OSError("fsync failed")
+
+    monkeypatch.setattr("xdg_kit.atomic.os.fsync", boom)
+    with pytest.raises(XdgKitError):
+        write_bytes_atomic(tmp_path / "f", b"secret-data")
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+@posix_only
+def test_fchmod_pins_mode_before_first_write(tmp_path, monkeypatch):
+    # the mode must be pinned before any secret bytes land, so the temp file never holds the
+    # secret at a mode wider than requested, even briefly
+    events: list[str] = []
+    real_fchmod = os.fchmod
+    real_fdopen = os.fdopen
+
+    def recording_fchmod(fd, mode):
+        events.append("fchmod")
+        return real_fchmod(fd, mode)
+
+    class _RecordingHandle:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def write(self, data):
+            events.append("write")
+            return self._handle.write(data)
+
+        def __getattr__(self, attr):
+            return getattr(self._handle, attr)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._handle.__exit__(*exc)
+
+    monkeypatch.setattr("xdg_kit.atomic.os.fchmod", recording_fchmod)
+    monkeypatch.setattr("xdg_kit.atomic.os.fdopen", lambda fd, *a, **k: _RecordingHandle(real_fdopen(fd, *a, **k)))
+    write_bytes_atomic(tmp_path / "f", b"secret")
+    assert events[0] == "fchmod" and events.index("fchmod") < events.index("write")

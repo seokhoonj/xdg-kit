@@ -48,20 +48,20 @@ def test_config_dir_has_no_override(monkeypatch, tmp_path):
     assert config_dir("nw") == tmp_path / "config" / "nw"
 
 
-@pytest.mark.parametrize("good", ["nw", "newswatcher", "opendart-client", "kis-trader", "a.b_c"])
-def test_valid_app_names_pass(good):
-    assert app_dir_segment(good) == good
+@pytest.mark.parametrize("valid_app_name", ["nw", "newswatcher", "opendart-client", "kis-trader", "a.b_c"])
+def test_valid_app_names_pass(valid_app_name):
+    assert app_dir_segment(valid_app_name) == valid_app_name
 
 
-@pytest.mark.parametrize("bad", ["", ".", "..", "../etc", "a/b", "a\\b", "/abs", "-lead", "trail-", "sp ace"])
-def test_traversal_and_junk_names_rejected(bad):
+@pytest.mark.parametrize("invalid_app_name", ["", ".", "..", "../etc", "a/b", "a\\b", "/abs", "-lead", "trail-", "sp ace"])
+def test_traversal_and_junk_names_rejected(invalid_app_name):
     with pytest.raises(ValueError):
-        app_dir_segment(bad)
+        app_dir_segment(invalid_app_name)
 
 
-def test_bad_app_name_rejected_by_dir_functions(bad="../../etc"):
+def test_bad_app_name_rejected_by_dir_functions(invalid_app_name="../../etc"):
     with pytest.raises(ValueError):
-        config_dir(bad)
+        config_dir(invalid_app_name)
 
 
 def test_absolute_xdg_value_is_expanded(monkeypatch, tmp_path):

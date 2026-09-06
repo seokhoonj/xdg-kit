@@ -54,4 +54,10 @@ def isolated_xdg(tmp_path, monkeypatch):
         monkeypatch.setenv(var, str(base))
     for var in _LEAKY_VARS:
         monkeypatch.delenv(var, raising=False)
+    # Reset the process-wide warn-once registries so a warning emitted by one test cannot
+    # suppress (or leak into) another -- otherwise assertions on the one-time warning would
+    # depend on test order.
+    monkeypatch.setattr("xdg_kit.backends._warned_keyring_fallback", False)
+    import xdg_kit.permissions
+    monkeypatch.setattr(xdg_kit.permissions, "_warned_permissive_paths", set())
     return tmp_path

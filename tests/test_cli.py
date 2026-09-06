@@ -7,6 +7,7 @@ import pytest
 from xdg_kit import __version__
 from xdg_kit.backends import FileBackend
 from xdg_kit.cli import main
+from xdg_kit.paths import config_dir
 
 
 def test_set_with_value_stores(capsys):
@@ -129,9 +130,33 @@ def test_bad_app_name_is_usage_error(capsys):
     assert "error" in capsys.readouterr().err
 
 
+def test_set_without_value_noninteractive_is_usage_error(capsys, monkeypatch):
+    # no --value and no interactive stdin: getpass raises EOFError, which must surface as a
+    # clean usage error (exit 2), not a bare traceback
+    def no_stdin(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("xdg_kit.cli.getpass.getpass", no_stdin)
+    assert main(["set", "nw", "K"]) == 2
+    assert "not interactive" in capsys.readouterr().err
+
+
 def test_doctor_discovers_apps_when_none_named(capsys):
     main(["set", "appone", "K", "--value", "v"])
     main(["set", "apptwo", "K", "--value", "v"])
     capsys.readouterr()
     assert main(["doctor"]) == 0                       # no app args -> discover them
     assert "checked 2" in capsys.readouterr().out
+
+
+def test_doctor_skips_invalid_neighbor_directory(capsys):
+    # a neighbor directory whose name is not a valid app segment must be skipped, not abort
+    # the whole sweep -- otherwise one stray folder under the config base breaks `doctor`
+    main(["set", "appone", "K", "--value", "v"])
+    config_base = config_dir("appone").parent
+    stray = config_base / "not a valid app"          # a space -> fails app_dir_segment
+    stray.mkdir()
+    (stray / "credentials.json").write_text("{}")
+    capsys.readouterr()
+    assert main(["doctor"]) == 0                       # stray neighbor does not abort discovery
+    assert "checked 1" in capsys.readouterr().out      # only the valid app is counted

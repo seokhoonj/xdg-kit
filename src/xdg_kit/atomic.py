@@ -49,7 +49,10 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
                 os.fsync(handle.fileno())   # durable before the rename
             os.replace(temp_path, path)
         except OSError:
-            temp_path.unlink(missing_ok=True)
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass   # cleanup is best-effort; never mask the original write failure below
             raise
     except OSError as err:
         raise XdgKitError(f"could not write {path}: {err}") from err

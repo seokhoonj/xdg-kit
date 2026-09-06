@@ -135,4 +135,9 @@ def _verify_private_dir(path: Path) -> None:
             f"{path} is owned by uid {info.st_uid}, not this user (uid {os.getuid()})"
         )
     if info.st_mode & 0o077:
+        # Bounded TOCTOU: this chmod follows symlinks and runs after the lstat above, so a
+        # swap of `path` for a symlink in between would retarget it. The window is closed in
+        # practice for the runtime fallback -- its parent is a 0700 directory we own under the
+        # sticky-bit system temp dir, where another user cannot rename our directory away.
+        # (os.chmod(..., follow_symlinks=False) is not available on Linux.)
         os.chmod(path, PRIVATE_DIR_MODE)   # we own it -- tighten rather than fail

@@ -118,10 +118,20 @@ def _credentials(args: argparse.Namespace) -> Credentials:
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
-    value = args.value if args.value is not None else getpass.getpass(f"{args.name}: ")
+    if args.value is not None:
+        value = args.value
+    else:
+        try:
+            value = getpass.getpass(f"{args.name}: ")
+        except EOFError:
+            # No interactive stdin (e.g. a script that omitted --value): report it as a
+            # usage error rather than letting the EOFError escape as a bare traceback.
+            print("xdg-kit: error: no value provided and stdin is not interactive; "
+                  "pass --value", file=sys.stderr)
+            return 2
     if not value.strip():
-        # A whitespace-only value reads back as absent (every read runs through _clean),
-        # so reject it here rather than store it and print a false "stored".
+        # A whitespace-only value reads back as absent (every read runs through
+        # _normalize_secret_value), so reject it here rather than store a false "stored".
         print("xdg-kit: error: empty value; nothing stored", file=sys.stderr)
         return 1
     _credentials(args).set(args.name, value=value)

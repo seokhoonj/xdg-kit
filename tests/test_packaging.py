@@ -8,8 +8,8 @@ import xdg_kit
 
 
 def test_version_matches_distribution_metadata():
-    # __version__ is hand-written in __init__ and the version lives in pyproject too;
-    # this keeps the two from drifting.
+    # __version__ is read from the installed distribution metadata (see __init__), so it can
+    # never drift from what pip resolved; this pins that invariant.
     assert xdg_kit.__version__ == metadata.version("xdg-kit")
 
 
