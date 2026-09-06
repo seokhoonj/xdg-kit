@@ -24,7 +24,22 @@
   (헤드리스 환경과 여러 머신에서 신뢰할 수 있음). OS 키링(keyring)은 파일 자동 폴백이
   딸린 opt-in 백엔드입니다.
 
-## 빠른 시작
+## 1. 설치
+
+```sh
+pip install xdg-kit            # 파일 저장소, 런타임 의존성 0
+pip install "xdg-kit[keyring]" # OS 키링(keyring) 사용 시 설치하는 옵션
+```
+
+설치 확인:
+
+```sh
+xdg-kit --version
+```
+
+Python 3.11+ 필요.
+
+## 2. 빠른 시작
 
 시크릿을 한 번 저장하고(에코 없이 입력받음):
 
@@ -42,22 +57,7 @@ config_dir("myapp")                       # ~/.config/myapp (파일이 사는 �
 Credentials("myapp").require("API_KEY")   # 시크릿 읽기; 없으면 예외
 ```
 
-## 1. 설치
-
-```sh
-pip install xdg-kit            # 파일 저장소, 런타임 의존성 0
-pip install "xdg-kit[keyring]" # OS 키링(keyring) 사용 시 설치하는 옵션
-```
-
-설치 확인:
-
-```sh
-xdg-kit --version
-```
-
-Python 3.11+ 필요.
-
-## 2. 디렉터리
+## 3. 디렉터리
 
 ```python
 from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
@@ -66,7 +66,7 @@ config_dir("myapp")   # ~/.config/myapp        (또는 $XDG_CONFIG_HOME/...)
 data_dir("myapp")     # ~/.local/share/myapp   (또는 $XDG_DATA_HOME/...)
 state_dir("myapp")    # ~/.local/state/myapp   (또는 $XDG_STATE_HOME/...)
 cache_dir("myapp")    # ~/.cache/myapp         (또는 $XDG_CACHE_HOME/...)
-runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 보안된 0700 임시 디렉터리
+runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 보호된 0700 임시 디렉터리
 ```
 
 앱 이름은 단일 경로 세그먼트(path segment, 슬래시 없는 한 조각)로 검증되므로, 조작된
@@ -75,10 +75,10 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 보안된 0700 임시 
 존중하므로, 큰 아카이브를 아무것도 수정하지 않고 다른 볼륨으로 옮길 수 있습니다.
 `runtime_dir`는 기본값이 명세에 정의되지 않은 유일한 XDG 디렉터리입니다. `XDG_RUNTIME_DIR`가
 설정되지 않았을 때(cron, 컨테이너, macOS, Windows) 명세가 지시하는 대로 시스템 임시
-디렉터리 아래에 uid로 키가 매겨진 비공개 디렉터리를 만들어 보안한 뒤 반환합니다
+디렉터리 아래에 uid로 키가 매겨진 비공개 디렉터리를 만들어 안전하게 보호한 뒤 반환합니다
 (`create=False`를 넘기면 생성 없이 경로만 계산).
 
-## 3. 시크릿
+## 4. 시크릿
 
 시크릿(비밀번호, 토큰, API 키)은 **앱 이름별 `credentials.json` 파일 하나**에 담깁니다 --
 `config_dir(app)/credentials.json`, 예를 들어 `myapp` 앱이면 `~/.config/myapp/credentials.json`.
@@ -109,7 +109,7 @@ secret_names("myapp")                            # -> list[str]
 `"auth"`) 하나에 한 번 저장하면, 모든 소비자가 `shared=["auth"]`로 그 키를 해석합니다. 한
 앱에만 특정한 키는 그 앱 자신의 저장소에 남습니다.
 
-## 4. `xdg-kit` 명령
+## 5. `xdg-kit` 명령
 
 각 패키지마다 다른 키 저장 방식을 익힐 필요 없이, 어떤 앱의 시크릿이든 한 곳에서 한
 형식으로 관리합니다:
@@ -131,7 +131,7 @@ xdg-kit doctor myapp other-app          # 지정한 앱만 점검
 `set`, `get`, `list`, `unset`은 `--keyring`을 받아 OS 키링 백엔드로 동작합니다(파일 자동
 폴백 포함). 종료 코드: `0` 성공, `1` 런타임 오류, `2` 사용법 오류(잘못된 앱 이름).
 
-## 5. 키링
+## 6. 키링
 
 비밀번호나 API 키 같은 시크릿은 두 곳 중 하나에 저장할 수 있습니다:
 
@@ -169,7 +169,7 @@ creds = Credentials("myapp", backend=backend)
 예전 키링 항목을 지워서 고치려 하지 *마세요*: 키링이 열려 있는 동안에는 그 명령이 파일에 있던
 새 사본까지 함께 지워 값을 잃습니다.
 
-## 6. 로그에서 시크릿 마스킹
+## 7. 로그에서 시크릿 마스킹
 
 API는 종종 에러 메시지나 요청 URL 안에 당신의 키를 그대로 되돌려줍니다. 그래서 안 가린
 예외를 그냥 로그에 남기면, 실패에 쓰인 바로 그 시크릿이 로그 파일이나 터미널로 새어 나갈 수
@@ -186,7 +186,7 @@ raise scrub_exception(err, [key])               # __cause__/__context__ 체인 �
 다시 씁니다. 커스텀 `__str__`을 가진 예외라면 렌더된 로그 줄도 `scrub_secrets`에 함께
 통과시키세요.
 
-## 7. 단일 인스턴스 잠금
+## 8. 중복 실행 방지 (단일 인스턴스 잠금)
 
 같은 작업이 자기 자신의 다른 복사본과 겹쳐서 실행되는 것을 막습니다 — cron 두 개, 또는 cron과
 수동 실행이 겹칠 때. 그러면 같은 일을 두 번 하고, 같은 출력이 중복으로 나가고(중복 전송,
@@ -212,24 +212,32 @@ if lock.acquire():
 잠금은 `runtime_dir`에 위치하며 프로세스가 종료될 때 — 크래시가 나더라도 — OS가
 해제합니다.
 
-## 8. 공개 API 레퍼런스
+## 9. 공개 API 레퍼런스
+
+### 자주 쓰는 API
 
 | Import | 무엇인가 |
 |--------|----------|
 | `config_dir` / `data_dir` / `state_dir` / `cache_dir` (`xdg_kit`) | 앱의 XDG 디렉터리 (`Path`). |
-| `runtime_dir(app, *, create=True)` (`xdg_kit`) | 보안된 세션 런타임 디렉터리. |
+| `runtime_dir(app, *, create=True)` (`xdg_kit`) | 안전하게 보호된 세션 런타임 디렉터리. |
 | `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | 4계층 시크릿 해석기: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
 | `get_secret` / `require_secret` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | `Credentials` 위의 모듈 수준 원샷 편의 함수. |
-| `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | 저장 seam과 두 구현. |
+| `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | 저장 백엔드: 파일 저장소(기본)와 OS 키링, 그리고 선택 함수. |
 | `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | 텍스트와 예외 체인에서 시크릿 값을 마스킹. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | `runtime_dir`의 단일 인스턴스 advisory 잠금. |
+| `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | 예외 계층. |
+
+### 빌딩블록 (라이브러리 작성자용 — 직접 호출은 드묾)
+
+| Import | 무엇인가 |
+|--------|----------|
+| `SecretBackend` (`xdg_kit.backends`) | 백엔드 인터페이스(`Protocol`) — 나만의 저장 백엔드를 만들 때 구현. |
 | `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | 디렉터리/파일 권한 보장과 점검. |
 | `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | 원자적 0600 쓰기. |
 | `env_value` / `absolute_override` (`xdg_kit.environment`) | 환경값 읽기(빈 값 = 없음) / 절대경로 override. |
 | `app_dir_segment` (`xdg_kit.paths`) | 앱 이름을 안전한 경로 세그먼트로 검증. |
-| `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | 예외 계층. |
 
-## 9. 라이브러리 작성자를 위해
+## 10. 라이브러리 작성자를 위해
 
 xdg-kit은 기반 계층만 제공합니다 — 디렉터리, 시크릿 해석, 권한, 원자적 쓰기, 잠금,
 마스킹. 당신의 패키지는 자기 도메인 설정(계정, 라우트, 토픽)을 그대로 유지하면서 그
@@ -245,6 +253,6 @@ def api_key() -> str:
     return Credentials("yourapp").require("YOURAPP_API_KEY")
 ```
 
-## 10. 라이선스
+## 11. 라이선스
 
 MIT

@@ -25,7 +25,22 @@ way, on every OS.
   (reliable headless and across machines); the OS keyring is an opt-in backend with
   automatic file fallback.
 
-## Quickstart
+## 1. Install
+
+```sh
+pip install xdg-kit            # file store, zero runtime dependencies
+pip install "xdg-kit[keyring]" # add the optional OS keyring backend
+```
+
+Check it worked:
+
+```sh
+xdg-kit --version
+```
+
+Requires Python 3.11+.
+
+## 2. Quickstart
 
 Store a secret once (prompted, without echo):
 
@@ -43,22 +58,7 @@ config_dir("myapp")                       # ~/.config/myapp (where files live)
 Credentials("myapp").require("API_KEY")   # read the secret; raises if unset
 ```
 
-## 1. Install
-
-```sh
-pip install xdg-kit            # file store, zero runtime dependencies
-pip install "xdg-kit[keyring]" # add the optional OS keyring backend
-```
-
-Check it worked:
-
-```sh
-xdg-kit --version
-```
-
-Requires Python 3.11+.
-
-## 2. Directories
+## 3. Directories
 
 ```python
 from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
@@ -78,7 +78,7 @@ specified default; when `XDG_RUNTIME_DIR` is unset (cron, containers, macOS, Win
 creates and secures a private uid-keyed directory under the system temp dir, as the spec
 directs, and returns it (pass `create=False` to compute the path without creating it).
 
-## 3. Secrets
+## 4. Secrets
 
 ```python
 from xdg_kit import Credentials, get_secret, require_secret, set_secret, unset_secret, secret_names
@@ -103,7 +103,7 @@ The **shared store** is how a key common to several apps stops being duplicated:
 once under a shared app (say `"auth"`), and every consumer resolves it with
 `shared=["auth"]`. A key specific to one app stays in that app's own store.
 
-## 4. The `xdg-kit` command
+## 5. The `xdg-kit` command
 
 Manage any app's secrets from one place, in one format — no need to learn each package's
 own way to store a key:
@@ -126,7 +126,7 @@ xdg-kit doctor myapp other-app          # check only the named apps
 (with automatic file fallback). Exit codes: `0` success, `1` a runtime error, `2` a usage
 error (an invalid app name).
 
-## 5. Keyring
+## 6. Keyring
 
 Secrets — passwords, tokens, API keys — can live in one of two places:
 
@@ -168,7 +168,7 @@ keyring and the stale file copy is cleared. Do *not* try to fix it by deleting t
 entry with `xdg-kit unset --keyring`: while the keyring is reachable that also deletes the
 newer file copy, losing the value.
 
-## 6. Redacting secrets from logs
+## 7. Redacting secrets from logs
 
 An API often echoes your key back inside an error message or a request URL, so logging an
 unscrubbed exception can leak the very secret it failed with into a log file or your terminal.
@@ -185,7 +185,7 @@ raise scrub_exception(err, [key])               # scrubs the whole __cause__/__c
 attribute; for an exception with a custom `__str__`, also pass the rendered log line
 through `scrub_secrets`.
 
-## 7. Single-instance locking
+## 8. Single-instance locking
 
 Stop a job from overlapping with another copy of itself — two cron runs, or a cron run and a
 manual one. Such runs redo the same work, produce duplicate output (double sends,
@@ -211,7 +211,9 @@ if lock.acquire():
 The lock lives in `runtime_dir` and is released by the OS when the process exits, even on a
 crash.
 
-## 8. Public API reference
+## 9. Public API reference
+
+### Everyday API
 
 | Import | What it is |
 |--------|------------|
@@ -219,16 +221,22 @@ crash.
 | `runtime_dir(app, *, create=True)` (`xdg_kit`) | Secured session runtime directory. |
 | `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | The four-tier secret resolver: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
 | `get_secret` / `require_secret` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | Module-level one-shot convenience over `Credentials`. |
-| `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | The storage seam and its two implementations. |
+| `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | Storage backends: the file store (default) and the OS keyring, plus the chooser. |
 | `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | Redact secret values from text and exception chains. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | Single-instance advisory locking in `runtime_dir`. |
+| `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | The exception hierarchy. |
+
+### Building blocks (for library authors — rarely called directly)
+
+| Import | What it is |
+|--------|------------|
+| `SecretBackend` (`xdg_kit.backends`) | The backend interface (a `Protocol`) — implement it to write your own store. |
 | `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | Directory/file permission guarantees and checks. |
 | `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | Atomic 0600 writes. |
 | `env_value` / `absolute_override` (`xdg_kit.environment`) | Read an env value (blank = absent) / an absolute-path override. |
 | `app_dir_segment` (`xdg_kit.paths`) | Validate an app name as a safe path segment. |
-| `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | The exception hierarchy. |
 
-## 9. For library authors
+## 10. For library authors
 
 `xdg-kit` provides only the base layer — directories, secret resolution, permissions,
 atomic writes, locking, and scrubbing. Your package keeps its own domain configuration
@@ -244,6 +252,6 @@ def api_key() -> str:
     return Credentials("yourapp").require("YOURAPP_API_KEY")
 ```
 
-## 10. License
+## 11. License
 
 MIT
