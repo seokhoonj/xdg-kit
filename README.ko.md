@@ -227,7 +227,7 @@ if lock.acquire():
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | `runtime_dir`의 단일 인스턴스 advisory 잠금. |
 | `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | 예외 계층. |
 
-### 빌딩블록 (라이브러리 작성자용 — 직접 호출은 드묾)
+### 빌딩 블록 (라이브러리 작성자용)
 
 | Import | 무엇인가 |
 |--------|----------|
