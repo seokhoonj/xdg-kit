@@ -25,6 +25,24 @@ way, on every OS.
   (reliable headless and across machines); the OS keyring is an opt-in backend with
   automatic file fallback.
 
+## Quickstart
+
+Store a secret once (prompted, without echo):
+
+```sh
+xdg-kit set myapp API_KEY
+```
+
+Then read it back in code — `require` resolves it ($API_KEY, else myapp's store) and raises
+if it is set nowhere:
+
+```python
+from xdg_kit import config_dir, Credentials
+
+config_dir("myapp")                       # ~/.config/myapp (where files live)
+Credentials("myapp").require("API_KEY")   # read the secret; raises if unset
+```
+
 ## 1. Install
 
 ```sh

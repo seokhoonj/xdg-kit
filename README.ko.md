@@ -24,6 +24,24 @@
   (헤드리스 환경과 여러 머신에서 신뢰할 수 있음). OS 키링(keyring)은 파일 자동 폴백이
   딸린 opt-in 백엔드입니다.
 
+## 빠른 시작
+
+시크릿을 한 번 저장하고(에코 없이 입력받음):
+
+```sh
+xdg-kit set myapp API_KEY
+```
+
+코드에서 읽어옵니다 — `require`가 해석하고($API_KEY, 없으면 myapp 저장소), 어디에도 없으면
+예외를 던집니다:
+
+```python
+from xdg_kit import config_dir, Credentials
+
+config_dir("myapp")                       # ~/.config/myapp (파일이 사는 곳)
+Credentials("myapp").require("API_KEY")   # 시크릿 읽기; 없으면 예외
+```
+
 ## 1. 설치
 
 ```sh
