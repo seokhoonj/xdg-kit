@@ -80,6 +80,11 @@ directs, and returns it (pass `create=False` to compute the path without creatin
 
 ## 4. Secrets
 
+Secrets (passwords, tokens, API keys) live in **one `credentials.json` per app** —
+`config_dir(app)/credentials.json`, e.g. `~/.config/myapp/credentials.json` for `myapp`.
+That one file is the app's **store**. Which store is read is decided by the app name, so one
+app can name another app's store and read it alongside its own (see **shared store** below).
+
 ```python
 from xdg_kit import Credentials, get_secret, require_secret, set_secret, unset_secret, secret_names
 
@@ -154,9 +159,11 @@ With the keyring turned on, xdg-kit behaves like this:
   authority over it — if the file also has the same key, the keyring value wins. A successful
   `set` / `unset` also clears any stale plaintext copy from the file, so switching to the
   keyring never leaves a file copy behind.
-- **When the keyring can't be used (not installed, locked, or absent on a server)**: the
-  operation falls back to the file store automatically, and a one-time warning is printed, so
-  a user who turned the keyring on learns the value went to the file instead.
+- **When the keyring can't be used**: an *absent* keyring (not installed, or no backend on a
+  server) makes every operation fall back to the file store, with a one-time warning so a user
+  who turned the keyring on learns the value went to the file. A *present but failing* keyring
+  (e.g. locked) still lets `get` and `set` fall back, but `unset` fails loudly (raises) rather
+  than risk reporting a secret deleted while it may still be in the keyring.
 
 **One caveat** — this reconciliation runs only one way, keyring → file; the
 reverse (file → keyring) is not automatic: a value written to the file while the keyring
