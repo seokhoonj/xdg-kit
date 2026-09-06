@@ -33,8 +33,8 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
-        tmp = Path(tmp_name)
+        fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+        temp_path = Path(temp_name)
         try:
             with os.fdopen(fd, "wb") as handle:
                 if hasattr(os, "fchmod"):
@@ -42,9 +42,9 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())   # durable before the rename
-            os.replace(tmp, path)
+            os.replace(temp_path, path)
         except OSError:
-            tmp.unlink(missing_ok=True)
+            temp_path.unlink(missing_ok=True)
             raise
     except OSError as err:
         raise XdgKitError(f"could not write {path}: {err}") from err

@@ -1,4 +1,4 @@
-"""Removing secret values from text before it is logged or surfaced.
+"""Removing secret secret_values from text before it is logged or surfaced.
 
 A provider often echoes the API key back inside an error message or a request URL, so an
 unscrubbed exception can leak the very secret it failed to use into a log or a terminal.
@@ -6,7 +6,7 @@ unscrubbed exception can leak the very secret it failed to use into a log or a t
 ``scrub_exception`` walks an exception and its ``__cause__`` / ``__context__`` chain and
 scrubs each one's ``args`` (and a transport error's URL) in place. Both are best-effort and
 never raise -- they run on the error path, where a second failure would mask the first.
-The caller supplies the secret *values* to redact; this module never reads a store.
+The caller supplies the secret *secret_values* to redact; this module never reads a store.
 """
 
 from __future__ import annotations
@@ -28,15 +28,16 @@ def scrub_secrets(text: str, secrets: Iterable[str]) -> str:
     leave the other's tail exposed. Best-effort and never raises: a non-iterable ``secrets``
     leaves ``text`` unchanged (matching ``scrub_exception``)."""
     try:
-        values = sorted(
+        secret_values = sorted(
             (value for value in secrets if isinstance(value, str) and value),
             key=len,
             reverse=True,
         )
     except Exception:
+        # a non-iterable or mid-iteration-raising `secrets` must not raise on the error path
         return text
     result = text
-    for value in values:
+    for value in secret_values:
         result = result.replace(value, REDACTION)
     return result
 
@@ -52,10 +53,10 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
     ``request.url`` or a ``.filename``), so also pass the rendered log line through
     ``scrub_secrets`` before emitting it."""
     try:
-        values = [value for value in secrets if isinstance(value, str) and value]
+        secret_values = [value for value in secrets if isinstance(value, str) and value]
     except Exception:
         return err   # a non-iterable or raising `secrets` must not mask the original error
-    if not values:
+    if not secret_values:
         return err
     seen: set[int] = set()
     stack: list[BaseException | None] = [err]
@@ -64,7 +65,7 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
         if node is None or id(node) in seen:
             continue
         seen.add(id(node))
-        _scrub_node(node, values)
+        _scrub_node(node, secret_values)
         for attr in ("__cause__", "__context__"):
             try:
                 stack.append(getattr(node, attr, None))
@@ -73,20 +74,20 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
     return err
 
 
-def _scrub_node(node: BaseException, values: list[str]) -> None:
+def _scrub_node(node: BaseException, secret_values: list[str]) -> None:
     """Scrub ``node.args`` and a transport error's ``url``, each guarded independently so a
     property that raises (httpx spells ``url`` as one) cannot abort the walk."""
     try:
         args = node.args
         if args:
             node.args = tuple(
-                scrub_secrets(arg, values) if isinstance(arg, str) else arg for arg in args
+                scrub_secrets(arg, secret_values) if isinstance(arg, str) else arg for arg in args
             )
     except Exception:
         pass
     try:
         url = getattr(node, "url", None)
         if isinstance(url, str):
-            node.url = scrub_secrets(url, values)   # type: ignore[attr-defined]
+            node.url = scrub_secrets(url, secret_values)   # type: ignore[attr-defined]
     except Exception:
         pass

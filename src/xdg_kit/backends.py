@@ -58,7 +58,8 @@ class SecretBackend(Protocol):
     ``None`` when the store or key is absent; ``set`` and ``unset`` mutate it; ``names``
     lists the stored keys (never their values). ``value`` is keyword-only so it can never
     be swapped with ``name`` positionally -- a swap would store the secret *as a key
-    name*."""
+    name*. Surrounding whitespace is not significant: ``get`` returns a value stripped, so a
+    whitespace-only value reads back as ``None`` (absent)."""
 
     def get(self, app: str, name: str) -> str | None: ...
     def set(self, app: str, name: str, *, value: str) -> None: ...
@@ -172,8 +173,9 @@ class KeyringBackend:
     One direction cannot be closed: a value written to the file fallback *while the keyring
     is down* is not migrated into the keyring on recovery. If the keyring still holds an
     older value for that name, it will shadow the newer file value once it comes back (the
-    keyring is authoritative). Rotate a key while the keyring is reachable, or clear the
-    stale keyring entry, to avoid a superseded secret reappearing.
+    keyring is authoritative). Re-set the key while the keyring is reachable so the new value
+    lands in the keyring; do not try to fix it by deleting the keyring entry -- an ``unset``
+    while the keyring works also clears the file copy, losing the newer value.
     """
 
     def __init__(self, *, fallback: SecretBackend | None = None) -> None:
@@ -183,7 +185,11 @@ class KeyringBackend:
         try:
             import keyring
             value = keyring.get_password(app, name)
-        except Exception as err:   # missing package or any keyring backend failure
+        except Exception as err:
+            # Best-effort read: any keyring failure (missing package, locked or broken
+            # backend) falls back to the file. A third-party backend's error surface is not
+            # fully knowable, so the catch is deliberately broad -- unlike unset, which fails
+            # closed because reporting a delete that did not happen would strand a live secret.
             return self._fallback_get(app, name, err)
         return _clean(value)
 

@@ -32,6 +32,8 @@ class FileLock:
     in ``runtime_dir(app)``. Acquire it, check ``acquired``, and release it -- or use it as
     a context manager. Re-acquiring or releasing when not held is safe."""
 
+    acquired: bool   # whether this lock is currently held (public: callers read it)
+
     def __init__(self, app: str, name: str) -> None:
         """Bind to an ``app`` and a lock ``name``. Both are validated as safe path segments
         here (fail-fast), so a crafted ``name`` such as ``"../escape"`` cannot place the
