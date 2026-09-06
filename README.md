@@ -1,6 +1,11 @@
-**English** | [한국어](README.ko.md)
-
 # xdg-kit
+
+[![check](https://github.com/seokhoonj/xdg-kit/actions/workflows/check.yml/badge.svg)](https://github.com/seokhoonj/xdg-kit/actions/workflows/check.yml)
+[![PyPI](https://img.shields.io/pypi/v/xdg-kit)](https://pypi.org/project/xdg-kit/)
+[![Python](https://img.shields.io/pypi/pyversions/xdg-kit)](https://pypi.org/project/xdg-kit/)
+[![License](https://img.shields.io/pypi/l/xdg-kit)](https://github.com/seokhoonj/xdg-kit/blob/main/LICENSE)
+
+**English** | [한국어](README.ko.md)
 
 Secure XDG-style application storage for Python: paths, credentials, permissions, and
 runtime files.

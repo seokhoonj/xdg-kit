@@ -1,6 +1,11 @@
-[English](README.md) | **한국어**
-
 # xdg-kit
+
+[![check](https://github.com/seokhoonj/xdg-kit/actions/workflows/check.yml/badge.svg)](https://github.com/seokhoonj/xdg-kit/actions/workflows/check.yml)
+[![PyPI](https://img.shields.io/pypi/v/xdg-kit)](https://pypi.org/project/xdg-kit/)
+[![Python](https://img.shields.io/pypi/pyversions/xdg-kit)](https://pypi.org/project/xdg-kit/)
+[![License](https://img.shields.io/pypi/l/xdg-kit)](https://github.com/seokhoonj/xdg-kit/blob/main/LICENSE)
+
+[English](README.md) | **한국어**
 
 파이썬을 위한 안전한 XDG 스타일 애플리케이션 저장소: 경로, 자격증명, 권한, 런타임 파일.
 
