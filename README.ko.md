@@ -75,8 +75,8 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 보호된 0700 임시 
 존중하므로, 큰 아카이브를 아무것도 수정하지 않고 다른 볼륨으로 옮길 수 있습니다.
 `runtime_dir`는 기본값이 명세에 정의되지 않은 유일한 XDG 디렉터리입니다. `XDG_RUNTIME_DIR`가
 설정되지 않았을 때(cron, 컨테이너, macOS, Windows) 명세가 지시하는 대로 시스템 임시
-디렉터리 아래에 uid로 키가 매겨진 비공개 디렉터리를 만들어 안전하게 보호한 뒤 반환합니다
-(`create=False`를 넘기면 생성 없이 경로만 계산).
+디렉터리 아래에 비공개 디렉터리(POSIX에서는 공유 `/tmp` 탈취를 막기 위해 uid로 키를 매김)를
+만들어 안전하게 보호한 뒤 반환합니다 (`create=False`를 넘기면 생성 없이 경로만 계산).
 
 ## 4. 시크릿
 
@@ -129,7 +129,8 @@ xdg-kit doctor myapp other-app          # 지정한 앱만 점검
 ```
 
 `set`, `get`, `list`, `unset`은 `--keyring`을 받아 OS 키링 백엔드로 동작합니다(파일 자동
-폴백 포함). 종료 코드: `0` 성공, `1` 런타임 오류, `2` 사용법 오류(잘못된 앱 이름).
+폴백 포함). 종료 코드: `0` 성공, `1` 명령 실패(미설정/빈 시크릿, 또는 런타임 오류), `2`
+사용법 오류(잘못된 앱 이름, 또는 대화형 프롬프트가 없는데 `set`에 값을 안 준 경우).
 
 ## 6. 키링
 
@@ -228,6 +229,7 @@ if lock.acquire():
 | `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | 텍스트와 예외 체인에서 시크릿 값을 마스킹. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | `runtime_dir`의 단일 인스턴스 advisory 잠금. |
 | `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | 예외 계층. |
+| `__version__` (`xdg_kit`) | 설치된 패키지 버전 문자열. |
 
 ### 빌딩 블록 (라이브러리 작성자용)
 
@@ -235,6 +237,7 @@ if lock.acquire():
 |--------|----------|
 | `SecretBackend` (`xdg_kit.backends`) | 백엔드 인터페이스(`Protocol`) — 나만의 저장 백엔드를 만들 때 구현. |
 | `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | 디렉터리/파일 권한 보장과 점검. |
+| `PRIVATE_FILE_MODE` / `PRIVATE_DIR_MODE` (`xdg_kit.permissions`) | 비공개 파일/디렉터리에 쓰는 `0600` / `0700` 모드 상수. |
 | `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | 원자적 0600 쓰기. |
 | `env_value` / `absolute_override` (`xdg_kit.environment`) | 환경값 읽기(빈 값 = 없음) / 절대경로 override. |
 | `app_dir_segment` (`xdg_kit.paths`) | 앱 이름을 안전한 경로 세그먼트로 검증. |

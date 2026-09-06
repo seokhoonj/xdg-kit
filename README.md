@@ -75,8 +75,9 @@ base. `data_dir` and `state_dir` also honour a per-app `<APP>_DATA_DIR` / `<APP>
 environment override (an absolute path used as-is), so a large archive can be relocated to
 another volume without editing anything. `runtime_dir` is the one XDG directory with no
 specified default; when `XDG_RUNTIME_DIR` is unset (cron, containers, macOS, Windows) it
-creates and secures a private uid-keyed directory under the system temp dir, as the spec
-directs, and returns it (pass `create=False` to compute the path without creating it).
+creates and secures a private directory under the system temp dir (uid-keyed on POSIX,
+where a shared `/tmp` must not be hijacked), as the spec directs, and returns it (pass
+`create=False` to compute the path without creating it).
 
 ## 4. Secrets
 
@@ -128,8 +129,9 @@ xdg-kit doctor myapp other-app          # check only the named apps
 ```
 
 `set`, `get`, `list`, and `unset` accept `--keyring` to operate on the OS keyring backend
-(with automatic file fallback). Exit codes: `0` success, `1` a runtime error, `2` a usage
-error (an invalid app name).
+(with automatic file fallback). Exit codes: `0` success, `1` a command failure (a missing
+or empty secret, or a runtime error), `2` a usage error (an invalid app name, or no value
+given to `set` with no interactive prompt available).
 
 ## 6. Keyring
 
@@ -232,6 +234,7 @@ crash.
 | `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | Redact secret values from text and exception chains. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | Single-instance advisory locking in `runtime_dir`. |
 | `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | The exception hierarchy. |
+| `__version__` (`xdg_kit`) | The installed package version string. |
 
 ### Building blocks (for library authors — rarely called directly)
 
@@ -239,6 +242,7 @@ crash.
 |--------|------------|
 | `SecretBackend` (`xdg_kit.backends`) | The backend interface (a `Protocol`) — implement it to write your own store. |
 | `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | Directory/file permission guarantees and checks. |
+| `PRIVATE_FILE_MODE` / `PRIVATE_DIR_MODE` (`xdg_kit.permissions`) | The `0600` / `0700` mode constants for private files and directories. |
 | `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | Atomic 0600 writes. |
 | `env_value` / `absolute_override` (`xdg_kit.environment`) | Read an env value (blank = absent) / an absolute-path override. |
 | `app_dir_segment` (`xdg_kit.paths`) | Validate an app name as a safe path segment. |
