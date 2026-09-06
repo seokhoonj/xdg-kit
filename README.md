@@ -140,8 +140,9 @@ With the keyring turned on, xdg-kit behaves like this:
   operation falls back to the file store automatically, and a one-time warning is printed, so
   a user who turned the keyring on learns the value went to the file instead.
 
-**One caveat** — the reverse direction is not reconciled automatically. A value written to
-the file while the keyring was unavailable is *not* migrated back into the keyring once it
+**One caveat** — this reconciliation runs only one way, keyring → file; the
+reverse (file → keyring) is not automatic: a value written to the file while the keyring
+was unavailable is *not* migrated back into the keyring once it
 recovers. So if the keyring still holds an older value for that key, a read hits the keyring
 first and that older value shadows the newer one in the file. The reliable fix is to
 **re-set the key while the keyring is reachable** — the new value then goes straight into the

@@ -123,7 +123,7 @@ xdg-kit doctor myapp other-app          # 지정한 앱만 점검
   안전하지만, 화면 없는 서버 · cron 예약 실행 · 컨테이너처럼 키링이 없거나 잠긴 곳에서는
   쓸 수 없습니다.
 
-기본을 파일로 둔 건 "어디서나 된다"는 신뢰성 때문입니다. 키링을 쓰려면 직접 켜야 합니다:
+기본을 파일로 둔 건 "어디서나 된다"는 신뢰성 때문입니다. 키링을 쓰려면 직접 지정해야 합니다:
 
 ```python
 from xdg_kit.backends import FileBackend, KeyringBackend, default_backend
@@ -134,24 +134,24 @@ creds = Credentials("myapp", backend=backend)
 # 또는: default_backend(use_keyring=True) -- 같은 뜻
 ```
 
-이렇게 켜면 xdg-kit은 이렇게 동작합니다.
+이렇게 지정하면 xdg-kit은 이렇게 동작합니다.
 
 - **평소(키링이 열려 있을 때)**: 값은 키링에 저장되고, 그 값에 대한 권한을 키링이 가집니다
-  — 파일에도 같은 키가 있으면 키링 값이 이깁니다. `set` / `unset`이 성공하면 파일에 남아
+  — 파일에도 같은 키가 있으면 키링 값이 우선합니다. `set` / `unset`이 성공하면 파일에 남아
   있던 예전 평문 복사본까지 지워서, 키링으로 옮긴 뒤 파일에 사본이 남지 않게 합니다.
 - **키링을 쓸 수 없을 때(설치 안 됨 · 잠김 · 서버라 키링이 없음)**: 작업이 자동으로 파일
-  저장소로 물러납니다(폴백 -- 대비책으로 내려감). 이때 경고가 한 번 떠서, 키링을 켠
+  저장소를 대신 씁니다(폴백 -- 대비책으로 전환). 이때 경고가 한 번 떠서, 키링을 지정한
   사용자가 "지금 값이 키링이 아니라 파일에 저장됐다"는 걸 알 수 있습니다.
 
-**주의할 점 하나** -- 반대 방향은 자동으로 정리되지 않습니다. 키링을 쓸 수 없던 동안 파일에
+**주의할 점 하나** -- 이 정리는 *키링 → 파일* 한 방향뿐입니다. 반대(*파일 → 키링*)는 자동으로 되지 않습니다: 키링을 쓸 수 없던 동안 파일에
 저장된 값은, 나중에 키링이 다시 열려도 키링으로 자동으로 옮겨지지 않습니다. 그래서 키링에
 예전 값이 그대로 남아 있으면, 읽을 때 키링을 먼저 보기 때문에 그 예전 값이 새 값을
-가려버립니다. 확실한 해결은 **키링이 열려 있을 때 키를 다시 설정(set)하는 것**입니다 -- 그러면
+가려버립니다. 확실한 해결책은 **키링이 열려 있을 때 키를 다시 설정(set)하는 것**입니다 -- 그러면
 새 값이 곧장 키링으로 들어가고 파일에 남은 낡은 사본도 지워집니다. `xdg-kit unset --keyring`으로
 예전 키링 항목을 지워서 고치려 하지 *마세요*: 키링이 열려 있는 동안에는 그 명령이 파일에 있던
 새 사본까지 함께 지워 값을 잃습니다.
 
-## 6. 로그에서 시크릿 가리기
+## 6. 로그에서 시크릿 마스킹
 
 API는 종종 에러 메시지나 요청 URL 안에 당신의 키를 그대로 되돌려줍니다. 그래서 안 가린
 예외를 그냥 로그에 남기면, 실패에 쓰인 바로 그 시크릿이 로그 파일이나 터미널로 새어 나갈 수
@@ -161,7 +161,7 @@ API는 종종 에러 메시지나 요청 URL 안에 당신의 키를 그대로 �
 from xdg_kit.scrub import scrub_secrets, scrub_exception
 
 scrub_secrets("failed with sk-abc123", [key])   # "failed with ***"
-raise scrub_exception(err, [key])               # __cause__/__context__ 체인 전체를 가림
+raise scrub_exception(err, [key])               # __cause__/__context__ 체인 전체를 마스킹
 ```
 
 `scrub_exception`은 절대 예외를 던지지 않으며 각 예외의 `args`와 문자열 `url` 속성을
@@ -170,10 +170,10 @@ raise scrub_exception(err, [key])               # __cause__/__context__ 체인 �
 
 ## 7. 단일 인스턴스 잠금
 
-같은 작업이 자기 자신의 다른 복사본과 겹쳐 도는 것을 막습니다 — cron 두 개, 또는 cron과
+같은 작업이 자기 자신의 다른 복사본과 겹쳐서 실행되는 것을 막습니다 — cron 두 개, 또는 cron과
 수동 실행이 겹칠 때. 그러면 같은 일을 두 번 하고, 같은 출력이 중복으로 나가고(중복 전송,
-중복 레코드), 공유 상태에서 경쟁(race)이 생깁니다(두 실행이 한 파일을 동시에 써서 깨뜨림).
-`FileLock`은 나중 실행이 "이미 하나가 돌고 있음"을 감지해, 몰리지 않고 건너뛰게 해줍니다.
+중복 레코드), 공유 상태에서 경쟁(race)이 생깁니다(두 가지 실행이 하나의 파일을 동시에 써서 깨뜨림).
+`FileLock`은 나중 실행이 "이미 하나가 돌고 있음"을 감지해, 중복 실행 없이 건너뛰게 해줍니다.
 
 ```python
 from xdg_kit.locking import FileLock, single_instance
@@ -203,7 +203,7 @@ if lock.acquire():
 | `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | 4계층 시크릿 해석기: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
 | `get_secret` / `require_secret` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | `Credentials` 위의 모듈 수준 원샷 편의 함수. |
 | `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | 저장 seam과 두 구현. |
-| `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | 텍스트와 예외 체인에서 시크릿 값을 가림. |
+| `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | 텍스트와 예외 체인에서 시크릿 값을 마스킹. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | `runtime_dir`의 단일 인스턴스 advisory 잠금. |
 | `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | 디렉터리/파일 권한 보장과 점검. |
 | `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | 원자적 0600 쓰기. |
@@ -214,7 +214,7 @@ if lock.acquire():
 ## 9. 라이브러리 작성자를 위해
 
 xdg-kit은 기반 계층만 제공합니다 — 디렉터리, 시크릿 해석, 권한, 원자적 쓰기, 잠금,
-스크러빙. 당신의 패키지는 자기 도메인 설정(계정, 라우트, 토픽)을 그대로 유지하면서 그
+마스킹. 당신의 패키지는 자기 도메인 설정(계정, 라우트, 토픽)을 그대로 유지하면서 그
 아래에서 xdg-kit을 가져다 씁니다:
 
 ```python
