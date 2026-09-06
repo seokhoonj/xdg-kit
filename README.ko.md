@@ -64,7 +64,7 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 보안된 0700 임시 
 **공유 저장소**).
 
 ```python
-from xdg_kit import Credentials, secret, require, set_secret, unset_secret, secret_names
+from xdg_kit import Credentials, get_secret, require_secret, set_secret, unset_secret, secret_names
 
 # 해석 순서: override > 환경변수 > 공유 저장소 > 이 앱의 저장소
 creds = Credentials("myapp", shared=["auth"])
@@ -75,8 +75,8 @@ creds.unset("API_KEY")                 # myapp 저장소에서 삭제 (없으면
 creds.names()                          # ["API_KEY", ...] -- 이름만, 값은 절대 반환하지 않음
 
 # 모듈 수준 원샷 편의 함수 (각각 내부에서 Credentials를 구성):
-secret("myapp", "API_KEY")                       # -> str | None
-require("myapp", "API_KEY")                      # -> str, 없으면 CredentialsError
+get_secret("myapp", "API_KEY")                   # -> str | None
+require_secret("myapp", "API_KEY")               # -> str, 없으면 CredentialsError
 set_secret("myapp", "API_KEY", value="sk-...")   # value는 키워드 전용
 unset_secret("myapp", "API_KEY")                 # 이 앱의 저장소에서 삭제 (없으면 무시)
 secret_names("myapp")                            # -> list[str]
@@ -196,7 +196,7 @@ if lock.acquire():
 | `config_dir` / `data_dir` / `state_dir` / `cache_dir` (`xdg_kit`) | 앱의 XDG 디렉터리 (`Path`). |
 | `runtime_dir(app, *, create=True)` (`xdg_kit`) | 보안된 세션 런타임 디렉터리. |
 | `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | 4계층 시크릿 해석기: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
-| `secret` / `require` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | `Credentials` 위의 모듈 수준 원샷 편의 함수. |
+| `get_secret` / `require_secret` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | `Credentials` 위의 모듈 수준 원샷 편의 함수. |
 | `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | 저장 seam과 두 구현. |
 | `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | 텍스트와 예외 체인에서 시크릿 값을 가림. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | `runtime_dir`의 단일 인스턴스 advisory 잠금. |

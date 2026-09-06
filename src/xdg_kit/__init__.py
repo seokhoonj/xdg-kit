@@ -4,7 +4,7 @@ runtime files.
 The common surface -- directories and secret resolution -- is re-exported here:
 
     from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
-    from xdg_kit import Credentials, secret, require
+    from xdg_kit import Credentials, get_secret, require_secret
 
 Deeper pieces stay in their modules so the import says what it reaches for:
 
@@ -19,8 +19,8 @@ from importlib.metadata import version
 
 from xdg_kit.credentials import (
     Credentials,
-    require,
-    secret,
+    get_secret,
+    require_secret,
     secret_names,
     set_secret,
     unset_secret,
@@ -48,8 +48,8 @@ __all__ = [
     "cache_dir",
     "runtime_dir",
     "Credentials",
-    "secret",
-    "require",
+    "get_secret",
+    "require_secret",
     "set_secret",
     "unset_secret",
     "secret_names",

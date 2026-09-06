@@ -58,7 +58,7 @@ directs, and returns it (pass `create=False` to compute the path without creatin
 ## 3. Secrets
 
 ```python
-from xdg_kit import Credentials, secret, require, set_secret, unset_secret, secret_names
+from xdg_kit import Credentials, get_secret, require_secret, set_secret, unset_secret, secret_names
 
 # Resolution order: override > environment > shared stores > this app's store
 creds = Credentials("myapp", shared=["auth"])
@@ -69,8 +69,8 @@ creds.unset("API_KEY")                 # removes it from myapp's store (no-op if
 creds.names()                          # ["API_KEY", ...] -- names only, never values
 
 # One-shot module-level convenience (each constructs a Credentials internally):
-secret("myapp", "API_KEY")                       # -> str | None
-require("myapp", "API_KEY")                      # -> str, raises CredentialsError if unset
+get_secret("myapp", "API_KEY")                   # -> str | None
+require_secret("myapp", "API_KEY")               # -> str, raises CredentialsError if unset
 set_secret("myapp", "API_KEY", value="sk-...")   # value is keyword-only
 unset_secret("myapp", "API_KEY")                 # remove from this app's store (no-op if absent)
 secret_names("myapp")                            # -> list[str]
@@ -194,7 +194,7 @@ crash.
 | `config_dir` / `data_dir` / `state_dir` / `cache_dir` (`xdg_kit`) | XDG directory for an app (a `Path`). |
 | `runtime_dir(app, *, create=True)` (`xdg_kit`) | Secured session runtime directory. |
 | `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | The four-tier secret resolver: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
-| `secret` / `require` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | Module-level one-shot convenience over `Credentials`. |
+| `get_secret` / `require_secret` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | Module-level one-shot convenience over `Credentials`. |
 | `SecretBackend` / `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | The storage seam and its two implementations. |
 | `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | Redact secret values from text and exception chains. |
 | `FileLock` / `single_instance` (`xdg_kit.locking`) | Single-instance advisory locking in `runtime_dir`. |

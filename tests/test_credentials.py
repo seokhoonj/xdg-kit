@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from xdg_kit.backends import FileBackend
-from xdg_kit.credentials import Credentials, require, secret, secret_names, set_secret
+from xdg_kit.credentials import Credentials, get_secret, require_secret, secret_names, set_secret
 from xdg_kit.errors import CredentialsError, InvalidAppNameError
 
 
@@ -64,9 +64,9 @@ def test_set_writes_to_own_store_only():
 
 def test_module_level_helpers(monkeypatch):
     set_secret("nw", "K", value="v")
-    assert secret("nw", "K") == "v"
+    assert get_secret("nw", "K") == "v"
     assert secret_names("nw") == ["K"]
-    assert require("nw", "K") == "v"
+    assert require_secret("nw", "K") == "v"
 
 
 def test_invalid_app_or_shared_name_rejected():

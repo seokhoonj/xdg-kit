@@ -29,8 +29,8 @@ from xdg_kit.paths import app_dir_segment
 
 __all__ = [
     "Credentials",
-    "secret",
-    "require",
+    "get_secret",
+    "require_secret",
     "set_secret",
     "unset_secret",
     "secret_names",
@@ -134,7 +134,7 @@ class Credentials:
         return self._backend.names(self._app)
 
 
-def secret(
+def get_secret(
     app: str,
     name: str,
     *,
@@ -147,7 +147,7 @@ def secret(
     return Credentials(app, shared=shared, backend=backend).secret(name, override=override)
 
 
-def require(
+def require_secret(
     app: str,
     name: str,
     *,
