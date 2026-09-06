@@ -1,4 +1,4 @@
-"""Removing secret secret_values from text before it is logged or surfaced.
+"""Removing secret values from text before it is logged or surfaced.
 
 A provider often echoes the API key back inside an error message or a request URL, so an
 unscrubbed exception can leak the very secret it failed to use into a log or a terminal.
@@ -6,7 +6,7 @@ unscrubbed exception can leak the very secret it failed to use into a log or a t
 ``scrub_exception`` walks an exception and its ``__cause__`` / ``__context__`` chain and
 scrubs each one's ``args`` (and a transport error's URL) in place. Both are best-effort and
 never raise -- they run on the error path, where a second failure would mask the first.
-The caller supplies the secret *secret_values* to redact; this module never reads a store.
+The caller supplies the secret *values* to redact; this module never reads a store.
 """
 
 from __future__ import annotations
