@@ -108,9 +108,20 @@ class Credentials:
         """Store ``value`` under ``name`` in this app's own store (never a shared one).
         ``value`` is keyword-only so it cannot be swapped with ``name``.
 
+        Surrounding whitespace is stripped before storing, so the stored file holds exactly
+        what ``secret`` returns -- resolution strips every tier (a pasted key's trailing
+        newline never survives a read), and storing the raw form would leave the file and the
+        resolved value disagreeing.
+
         Raises:
+            ValueError: ``value`` is empty or whitespace-only. A blank would list under
+                ``names`` yet resolve to ``None`` (``secret`` treats a blank tier as absent),
+                so it is refused at the boundary to keep set and get consistent.
             CredentialsError: the store could not be written (propagated from the backend).
         """
+        value = value.strip()
+        if not value:
+            raise ValueError(f"refusing to store a blank value for {name!r}")
         self._backend.set(self._app, name, value=value)
 
     def unset(self, name: str) -> None:
@@ -169,7 +180,15 @@ def set_secret(
 ) -> None:
     """Store one secret in ``app``'s own store -- convenience over
     ``Credentials(app, backend=backend).set(name, value=value)``. ``value`` is
-    keyword-only so it cannot be swapped with ``name``."""
+    keyword-only so it cannot be swapped with ``name``.
+
+    Surrounding whitespace is stripped before storing (matching resolution, which strips
+    every tier).
+
+    Raises:
+        ValueError: ``value`` is empty or whitespace-only (a blank would list yet resolve as
+            absent).
+        CredentialsError: the store could not be written (propagated from the backend)."""
     Credentials(app, backend=backend).set(name, value=value)
 
 

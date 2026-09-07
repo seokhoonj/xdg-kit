@@ -86,12 +86,25 @@ def test_repr_is_secret_safe():
 
 def test_blank_value_falls_through_each_tier(monkeypatch):
     # a blank (whitespace-only) value at any tier reads as absent and falls through to the
-    # next: override -> env -> shared -> app.
-    set_secret("auth", "K", value="   ")        # blank in the shared store
-    set_secret("nw", "K", value="from-app")     # real value in the app's own store
+    # next: override -> env -> shared -> app. set_secret refuses to store a blank, so the
+    # shared blank is planted straight through the backend -- the shape a hand-edited or
+    # legacy store could still hold.
+    FileBackend().set("auth", "K", value="   ")   # a blank already sitting in the shared store
+    set_secret("nw", "K", value="from-app")       # real value in the app's own store
     creds = Credentials("nw", shared=["auth"])
     # blank override skipped, env unset, blank shared skipped -> the app value wins
     assert creds.secret("K", override="   ") == "from-app"
     # a blank environment value also falls through (env unset would too)
     monkeypatch.setenv("K", "   ")
     assert creds.secret("K") == "from-app"
+
+
+def test_set_refuses_a_blank_value():
+    with pytest.raises(ValueError):
+        set_secret("nw", "K", value="   ")   # would list yet resolve as absent -- refused
+    assert secret_names("nw") == []          # nothing stored
+
+
+def test_set_strips_surrounding_whitespace_before_storing():
+    set_secret("nw", "K", value="  from-app\n")   # a pasted value's trailing newline
+    assert get_secret("nw", "K") == "from-app"    # stored and resolved without the whitespace

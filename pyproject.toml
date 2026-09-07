@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name            = "xdg-kit"
-version         = "0.1.0"
+version         = "0.2.0"
 description     = "Secure XDG-style application storage for Python: paths, credentials, permissions, and runtime files."
 readme          = "README.md"
 license         = "MIT"

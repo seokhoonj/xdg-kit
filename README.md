@@ -105,6 +105,10 @@ unset_secret("myapp", "API_KEY")                 # remove from this app's store 
 secret_names("myapp")                            # -> list[str]
 ```
 
+Storing a secret refuses a blank (empty or whitespace-only) value and strips surrounding
+whitespace, so a stored key matches what resolution returns and a pasted key's trailing
+newline never lands on disk.
+
 The **shared store** is how a key common to several apps stops being duplicated: store it
 once under a shared app (say `"auth"`), and every consumer resolves it with
 `shared=["auth"]`. A key specific to one app stays in that app's own store.
