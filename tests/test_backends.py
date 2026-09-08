@@ -4,8 +4,10 @@ never leaves a stale plaintext copy behind."""
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import traceback
 import types
 from typing import Any
 
@@ -78,6 +80,132 @@ def test_file_non_object_json_raises():
     fb.path("nw").write_text("[1, 2, 3]")
     with pytest.raises(CredentialsError):
         fb.get("nw", "K")
+
+
+def _contains_secret(value: object, secret: str, seen: set[int] | None = None) -> bool:
+    # Whether ``secret`` is reachable inside ``value``, recursing through the shapes a file's
+    # content actually takes in _load's locals -- a str (``text``) or a container (``parsed``)
+    # -- plus bytes, guarding cycles by id. Other types fall back to ``repr`` (xdg_kit's frame
+    # locals are only strings/containers, so no repr-redacting object hides a secret here). We
+    # deliberately do NOT recurse arbitrary ``__dict__``: that reaches into framework objects
+    # (a MonkeyPatch's stored closures) and false-positives on the test's own machinery.
+    seen = set() if seen is None else seen
+    if id(value) in seen:
+        return False
+    seen.add(id(value))
+    if isinstance(value, str):
+        return secret in value
+    if isinstance(value, bytes):
+        return secret.encode() in value
+    if isinstance(value, dict):
+        return any(_contains_secret(k, secret, seen) or _contains_secret(v, secret, seen)
+                   for k, v in value.items())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_contains_secret(item, secret, seen) for item in value)
+    return secret in repr(value)
+
+
+def _assert_no_secret_leak(exc_info, secret: str) -> None:
+    # The secret must be unreachable from the raised exception by every vector a reporter
+    # reads: the chained exceptions (__cause__ AND __context__ both None -- the content-bearing
+    # original is fully off the chain; `from None` alone leaves __context__ reachable), the
+    # str/repr, a formatted traceback, AND the f_locals of every *xdg_kit* frame in the
+    # traceback (Sentry captures tb_frame.f_locals). Only library frames are swept: on the read
+    # path the file content originates in _load, so a caller's frame never holds it -- but a
+    # test's own frame legitimately binds the secret it planted, which is not a library leak.
+    err = exc_info.value
+    rendered = "".join(traceback.format_exception(type(err), err, exc_info.tb))
+    assert err.__cause__ is None
+    assert err.__context__ is None
+    assert secret not in str(err)
+    assert secret not in repr(err)
+    assert secret not in rendered
+    tb = exc_info.tb
+    swept = 0
+    while tb is not None:
+        frame = tb.tb_frame
+        if f"{os.sep}xdg_kit{os.sep}" in frame.f_code.co_filename:
+            swept += 1
+            for value in list(frame.f_locals.values()):
+                assert not _contains_secret(value, secret), \
+                    f"secret in {frame.f_code.co_name}() locals"
+        tb = tb.tb_next
+    assert swept > 0, "swept no xdg_kit frame -- a refactor could make this pass vacuously"
+
+
+def test_malformed_json_error_does_not_leak_or_chain_file_content():
+    # JSONDecodeError.doc retains the whole parsed text (the secrets); the raised error must
+    # fully detach it and echo none of the file content
+    fb = FileBackend()
+    fb.path("nw").parent.mkdir(parents=True, exist_ok=True)
+    fb.path("nw").write_text('{"API_KEY": "s3cr3t-value"', encoding="utf-8")  # missing brace
+    with pytest.raises(CredentialsError) as exc_info:
+        fb.get("nw", "API_KEY")
+    _assert_no_secret_leak(exc_info, "s3cr3t-value")
+
+
+def test_non_utf8_file_error_does_not_leak_or_chain_bytes():
+    # UnicodeDecodeError.object carries the raw file bytes (the store content); the raised
+    # error must fully detach it and echo none of the bytes
+    fb = FileBackend()
+    fb.path("nw").parent.mkdir(parents=True, exist_ok=True)
+    fb.path("nw").write_bytes(b'{"API_KEY": "s3cr3t\xff\xfe"}')   # invalid UTF-8
+    with pytest.raises(CredentialsError) as exc_info:
+        fb.get("nw", "API_KEY")
+    _assert_no_secret_leak(exc_info, "s3cr3t")
+
+
+def test_non_object_json_error_does_not_leak_via_frame_locals():
+    # the "must contain a JSON object" path holds BOTH the raw text and the parsed value in
+    # its frame before raising; a secret-bearing non-object payload must leak through neither
+    fb = FileBackend()
+    fb.path("nw").parent.mkdir(parents=True, exist_ok=True)
+    fb.path("nw").write_text('["s3cr3t-in-a-list"]', encoding="utf-8")
+    with pytest.raises(CredentialsError) as exc_info:
+        fb.get("nw", "K")
+    _assert_no_secret_leak(exc_info, "s3cr3t-in-a-list")
+
+
+def test_deeply_nested_json_does_not_leak_via_frame_locals():
+    # a deeply nested payload makes json.loads raise RecursionError, NOT JSONDecodeError -- a
+    # non-parse exit that must still map to CredentialsError and clear the file content from
+    # the frame (the raw text was live in `text` until the finally)
+    fb = FileBackend()
+    fb.path("nw").parent.mkdir(parents=True, exist_ok=True)
+    fb.path("nw").write_text("[" * 100000 + '"s3cr3t-deep"', encoding="utf-8")
+    with pytest.raises(CredentialsError) as exc_info:
+        fb.get("nw", "API_KEY")
+    _assert_no_secret_leak(exc_info, "s3cr3t-deep")
+
+
+def test_json_decoder_message_is_never_carried_into_the_error(monkeypatch):
+    # the raised error is built from the JSON position (lineno/colno), never str(err): so even
+    # a (hypothetical) decoder message seeded with file content cannot reach the CredentialsError
+    secret = "s3cr3t-in-decoder-msg"
+
+    def raise_with_secret_message(text, *args, **kwargs):
+        raise json.JSONDecodeError(secret, "doc", 0)
+
+    monkeypatch.setattr("xdg_kit.backends.json.loads", raise_with_secret_message)
+    fb = FileBackend()
+    fb.path("nw").parent.mkdir(parents=True, exist_ok=True)
+    fb.path("nw").write_text('{"API_KEY": "value"}', encoding="utf-8")
+    with pytest.raises(CredentialsError) as exc_info:
+        fb.get("nw", "API_KEY")
+    _assert_no_secret_leak(exc_info, secret)
+
+
+def test_leak_detector_is_not_vacuous():
+    # negative control: the detector the sweep relies on actually FINDS a secret in the shapes
+    # _load's locals take (a bare str, a nested container, bytes) -- so a real frame leak would
+    # be caught -- and does not false-positive on a clean value
+    secret = "deliberately-retained-secret"
+    assert _contains_secret(secret, secret)
+    assert _contains_secret({"token": secret}, secret)
+    assert _contains_secret(["outer", [secret, "inner"]], secret)
+    assert _contains_secret(secret.encode(), secret)
+    assert not _contains_secret({"token": "something-else"}, secret)
+    assert not _contains_secret(["nothing", "here"], secret)
 
 
 def test_file_concurrent_set_no_lost_update():

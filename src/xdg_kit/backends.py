@@ -127,22 +127,47 @@ class FileBackend:
         """Parse ``credentials.json`` into a name -> value dict, or ``{}`` when the file is
         absent. Warns once when a present file is group/world-readable."""
         path = self.path(app)
+        # A malformed secret file must not leak its content through the exception it raises,
+        # by any vector a reporter (e.g. Sentry) reads. Three are closed here:
+        #  (1) the chained exception -- UnicodeDecodeError.object is the raw bytes and
+        #      json.JSONDecodeError.doc is the whole parsed text -- so each malformed case is
+        #      raised *outside* its except block (a `raise ... from None` inside would clear
+        #      __cause__ but leave __context__ pointing at the content-bearing exception);
+        #  (2) this frame's locals -- `text` holds the file content -- cleared in a `finally`
+        #      that runs on EVERY exit of the parse (JSONDecodeError, a RecursionError from
+        #      deep nesting, a MemoryError, a broken-pipe from the permission warning, or
+        #      success), not at hand-picked raise sites a new exception could slip past;
+        #  (3) the message -- only the JSON position (lineno/colno, ints) is carried, never
+        #      str(err), whose msg the pure-Python scanner can seed with a file character.
+        # Invariant: no content-bearing object is reachable from the raised CredentialsError.
+        text: str | None
         try:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return {}
-        except (OSError, UnicodeDecodeError) as err:
-            # UnicodeDecodeError is a ValueError, not an OSError, so name it explicitly or
-            # a non-UTF-8 file escapes this boundary as a bare traceback.
+        except OSError as err:
+            # An I/O error carries no file content; keep the cause and its errno detail.
             raise CredentialsError(f"could not read {path}: {err}") from err
-        warn_if_group_or_world_readable(path, app=app)
+        except UnicodeDecodeError:
+            text = None   # the raw bytes are on the (now dropped) exception, not bound here
+        if text is None:
+            raise CredentialsError(f"{path} is not valid UTF-8")
+        parse_error: str | None = None
         try:
-            secret_value_by_name = json.loads(text)
+            warn_if_group_or_world_readable(path, app=app)   # inside the finally's reach: a
+            parsed = json.loads(text)                        # broken-pipe here must still clear text
         except json.JSONDecodeError as err:
-            raise CredentialsError(f"{path} is not valid JSON: {err}") from err
-        if not isinstance(secret_value_by_name, dict):
+            parse_error = f"line {err.lineno}, column {err.colno}"   # ints only -- no file content
+        except RecursionError:
+            parse_error = "nesting too deep"
+        finally:
+            del text   # content out of this frame on every exit -- no exception carries it up
+        if parse_error is not None:
+            raise CredentialsError(f"{path} is not valid JSON ({parse_error})")
+        if not isinstance(parsed, dict):
+            del parsed   # the parsed value holds the secrets too
             raise CredentialsError(f"{path} must contain a JSON object of name to value")
-        return secret_value_by_name
+        return parsed
 
     def _save(self, app: str, secret_value_by_name: dict[str, object]) -> None:
         """Write the map back to ``credentials.json`` atomically at mode 0600, in a config
