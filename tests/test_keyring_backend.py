@@ -89,7 +89,7 @@ def test_no_backend_without_fallback_raises_nokeyringerror(monkeypatch: pytest.M
     keyring = _install_fake_keyring(monkeypatch)
 
     def no_backend(service: str, username: str) -> str:
-        raise keyring.errors.NoKeyringError("no backend on this host")  # type: ignore[attr-defined]
+        raise keyring.errors.NoKeyringError("no backend on this host")
 
     monkeypatch.setattr(keyring, "get_password", no_backend)
     with pytest.raises(NoKeyringError) as excinfo:
@@ -132,7 +132,7 @@ def test_unset_fails_closed_when_keyring_delete_errors(monkeypatch: pytest.Monke
     keyring = _install_fake_keyring(monkeypatch)
 
     def boom(service: str, username: str) -> None:
-        raise keyring.errors.KeyringError("store is locked")  # type: ignore[attr-defined]
+        raise keyring.errors.KeyringError("store is locked")
 
     monkeypatch.setattr(keyring, "delete_password", boom)
     with pytest.raises(CredentialsError):

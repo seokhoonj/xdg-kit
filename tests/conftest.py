@@ -5,7 +5,6 @@ provider keys.
 
 from __future__ import annotations
 
-import importlib
 import os
 
 import pytest
@@ -64,24 +63,8 @@ def _reset_warned_registries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the module-level warn-once state so a warning emitted by one test cannot suppress
     (or leak into) another -- otherwise assertions on a one-time warning would depend on test
     order. Tolerant of which package/module is importable during the credbox transition."""
-    for module_name, attr in (
-        ("credbox.permissions", "_warned_permissive_paths"),
-        ("xdg_kit.permissions", "_warned_permissive_paths"),
-    ):
-        module = _try_import(module_name)
-        if module is not None and isinstance(getattr(module, attr, None), set):
-            monkeypatch.setattr(module, attr, set())
-    for module_name, attr in (
-        ("credbox.backends.keyring", "_warned_keyring_fallback"),
-        ("xdg_kit.backends", "_warned_keyring_fallback"),
-    ):
-        module = _try_import(module_name)
-        if module is not None and hasattr(module, attr):
-            monkeypatch.setattr(module, attr, False)
+    import credbox.backends.keyring as keyring_backend
+    import credbox.permissions as permissions
 
-
-def _try_import(module_name: str):
-    try:
-        return importlib.import_module(module_name)
-    except ImportError:
-        return None
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    monkeypatch.setattr(keyring_backend, "_warned_keyring_fallback", False)
