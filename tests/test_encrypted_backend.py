@@ -86,6 +86,38 @@ def test_tampered_header_fails_via_aad_binding() -> None:
         _backend().get("myapp", "api_key")
 
 
+@pytest.mark.parametrize(
+    "blob",
+    [b"", b"\x00\x00\x00\x10short", b"not a credbox encrypted blob at all", b"\xff" * 64],
+    ids=["empty", "truncated-header", "garbage-text", "garbage-bytes"],
+)
+def test_garbage_or_truncated_blob_fails_closed_content_free(blob: bytes) -> None:
+    backend = _backend()
+    backend.set("myapp", "api_key", value=SECRET)
+    backend.path("myapp").write_bytes(blob)
+    with pytest.raises(DecryptionError) as excinfo:
+        _backend().get("myapp", "api_key")
+    err = excinfo.value
+    assert SECRET not in str(err)
+    assert err.__cause__ is None
+    assert err.__context__ is None
+
+
+def test_recursion_error_in_the_header_parse_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A tampered header whose JSON nests thousands of levels raises RecursionError in json.loads;
+    # it must be folded into a content-free DecryptionError, not escape as a traceback whose frames
+    # retain passphrase/blob. Mock-forced (PY 10.10) rather than building the crashing input.
+    backend = _backend()
+    backend.set("myapp", "api_key", value=SECRET)
+
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("header nests too deep")
+
+    monkeypatch.setattr("credbox.backends.encrypted.json.loads", _raise)
+    with pytest.raises(DecryptionError):
+        _backend().get("myapp", "api_key")
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")

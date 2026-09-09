@@ -46,18 +46,26 @@ class KeyringBackend:
 
     def get(self, app: str, name: str) -> Secret | None:
         """Return the keyring value for ``name`` as a ``Secret``, or ``None`` when set nowhere.
-        Falls back to the file when the keyring is unavailable (warning once), and when the
-        keyring is reachable but empty (so a value written to the file while the keyring was down
-        stays readable after recovery).
+        Falls back to the file ONLY when no keyring backend exists at all (`no_backend`, warning
+        once), and when the keyring is reachable but empty (so a value written to the file while
+        the keyring was structurally absent stays readable after recovery). **Fails closed on a
+        keyring error** -- it does NOT serve a stale file value in place of the authoritative
+        keyring value.
 
         Raises:
             NoKeyringError: no keyring backend exists and no fallback is configured.
-            CredentialsError: the keyring errored and no fallback is configured, or a consulted
-                fallback file is present but malformed.
+            CredentialsError: the keyring is present but the read failed (fail-closed -- the file
+                fallback is NOT consulted on a keyring error), or a consulted fallback file is
+                malformed.
         """
         status, raw = _try_keyring_get(app, name)
-        if status != "ok":
-            return self._fallback_get(app, name, structural=(status == "no_backend"))
+        if status == "no_backend":
+            return self._fallback_get(app, name)
+        if status == "failed":
+            # Fail closed: a present-but-erroring keyring must NOT silently serve a stale (or
+            # attacker-planted) file value in place of the authoritative keyring value. Raised
+            # where no exception is in flight (it died in _try_keyring_get), so content-free.
+            raise _keyring_operation_error(app, name)
         cleaned = _normalize_secret_value(raw)
         if cleaned is not None:
             return Secret(cleaned)
@@ -66,20 +74,28 @@ class KeyringBackend:
         return None
 
     def set(self, app: str, name: str, *, value: str | Secret) -> None:
-        """Store ``value`` in the keyring; a successful write also clears any stale plaintext
-        copy from the fallback file. Falls back to the file (warning once) when the keyring is
-        unavailable.
+        """Store ``value`` in the keyring; a successful write also clears any stale plaintext copy
+        from the fallback file. Falls back to the file ONLY when no keyring backend exists at all
+        (`no_backend`, warning once). **Fails closed on a keyring error** -- it does NOT silently
+        write plaintext to the fallback, which would report success while the keyring's old value
+        keeps shadowing this write on recovery.
 
         Raises:
-            NoKeyringError / CredentialsError: the keyring is unavailable and no fallback is
-                configured; or the keyring write succeeded but a stale file copy could not be
-                cleared.
+            NoKeyringError: no keyring backend exists and no fallback is configured.
+            CredentialsError: the keyring is present but the write failed (fail-closed -- no
+                plaintext is written to the fallback); or the write succeeded but a stale file copy
+                could not be cleared.
         """
         raw = value.reveal() if isinstance(value, Secret) else value
         status = _try_keyring_set(app, name, raw)
-        if status != "ok":
-            self._fallback_set(app, name, raw, structural=(status == "no_backend"))
+        if status == "no_backend":
+            self._fallback_set(app, name, raw)
             return
+        if status == "failed":
+            # Fail closed: do NOT silently write plaintext to the fallback on a keyring error --
+            # that would report success while the keyring's OLD value still shadows this write on
+            # recovery (a rotation that silently does not take effect). Content-free, no in-flight exc.
+            raise _keyring_operation_error(app, name)
         if self._fallback is not None:
             try:
                 self._fallback.unset(app, name)
@@ -105,13 +121,11 @@ class KeyringBackend:
                 _warn_keyring_fallback_once()
                 self._fallback.unset(app, name)
                 return
-            raise NoKeyringError(
-                f"no OS keyring backend available for {app}/{name} and no fallback is configured"
-            )
+            raise _no_backend_error(app, name)
         if status == "failed":
             # Keyring present but the delete genuinely failed: do NOT report success while the
             # secret may still be retrievable. Content-free -- no in-flight exception here.
-            raise CredentialsError(f"could not delete {app}/{name} from the keyring")
+            raise _keyring_operation_error(app, name)
         if self._fallback is not None:
             try:
                 self._fallback.unset(app, name)
@@ -130,29 +144,34 @@ class KeyringBackend:
         """
         return self._fallback.names(app) if self._fallback is not None else []
 
-    def _fallback_get(self, app: str, name: str, *, structural: bool) -> Secret | None:
+    def _fallback_get(self, app: str, name: str) -> Secret | None:
+        """Delegate to the file fallback (the legitimate headless `no_backend` case), warning
+        once; raise `NoKeyringError` when no fallback is configured."""
         if self._fallback is not None:
             _warn_keyring_fallback_once()
             return self._fallback.get(app, name)
-        raise self._unavailable_error(app, name, structural=structural)
+        raise _no_backend_error(app, name)
 
-    def _fallback_set(self, app: str, name: str, raw: str, *, structural: bool) -> None:
+    def _fallback_set(self, app: str, name: str, raw: str) -> None:
         if self._fallback is not None:
             _warn_keyring_fallback_once()
             self._fallback.set(app, name, value=raw)
             return
-        raise self._unavailable_error(app, name, structural=structural)
+        raise _no_backend_error(app, name)
 
-    def _unavailable_error(self, app: str, name: str, *, structural: bool) -> CredentialsError:
-        """A content-free error for the no-fallback case, raised where no third-party exception
-        is in flight so ``__cause__`` and ``__context__`` are both ``None``."""
-        if structural:
-            return NoKeyringError(
-                f"no OS keyring backend available for {app}/{name} and no fallback is configured"
-            )
-        return CredentialsError(
-            f"keyring unavailable for {app}/{name} and no fallback is configured"
-        )
+
+def _no_backend_error(app: str, name: str) -> NoKeyringError:
+    """A content-free error for "no OS keyring backend, and no fallback", raised where no
+    third-party exception is in flight so ``__cause__`` and ``__context__`` are both ``None``."""
+    return NoKeyringError(
+        f"no OS keyring backend available for {app}/{name} and no fallback is configured"
+    )
+
+
+def _keyring_operation_error(app: str, name: str) -> CredentialsError:
+    """A content-free error for a present-but-erroring keyring (fail-closed), raised where no
+    third-party exception is in flight so ``__cause__`` and ``__context__`` are both ``None``."""
+    return CredentialsError(f"keyring operation failed for {app}/{name}")
 
 
 # --- returning-frame keyring calls (the third-party exception dies here) --------
@@ -160,7 +179,10 @@ class KeyringBackend:
 # Each helper catches every keyring exception INSIDE its own frame and returns a status string,
 # so the exception never reaches a caller frame. That is what lets KeyringBackend raise a
 # content-free CredentialsError with __context__ == None: at the raise site there is no exception
-# in flight to become the implicit context.
+# in flight to become the implicit context. The `import keyring` guard is `except Exception` (not
+# just ImportError) because executing keyring's __init__ (backend/D-Bus discovery) can raise a
+# non-ImportError, which must be folded into a status here rather than escape as a raw traceback
+# whose frame retains `raw`.
 
 
 def _try_keyring_get(app: str, name: str) -> tuple[str, str | None]:
@@ -168,7 +190,7 @@ def _try_keyring_get(app: str, name: str) -> tuple[str, str | None]:
     try:
         import keyring
         import keyring.errors
-    except ImportError:
+    except Exception:
         return "no_backend", None
     try:
         return "ok", keyring.get_password(app, name)
@@ -183,7 +205,7 @@ def _try_keyring_set(app: str, name: str, raw: str) -> str:
     try:
         import keyring
         import keyring.errors
-    except ImportError:
+    except Exception:
         return "no_backend"
     try:
         keyring.set_password(app, name, raw)
@@ -199,7 +221,7 @@ def _try_keyring_delete(app: str, name: str) -> str:
     try:
         import keyring
         import keyring.errors
-    except ImportError:
+    except Exception:
         return "no_backend"
     try:
         keyring.delete_password(app, name)

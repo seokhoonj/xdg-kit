@@ -97,16 +97,50 @@ def test_no_backend_without_fallback_raises_nokeyringerror(monkeypatch: pytest.M
     assert excinfo.value.__context__ is None
 
 
-def test_falls_back_to_file_on_keyring_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(service: str, username: str) -> str:
-        raise RuntimeError("keyring is down")
+def test_falls_back_to_file_when_no_keyring_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The LEGITIMATE fallback: no OS keyring backend exists at all (headless). This is the only
+    # case that consults the file.
+    keyring = _install_fake_keyring(monkeypatch)
 
-    _install_fake_keyring(monkeypatch, get=boom)
+    def no_backend(service: str, username: str) -> str:
+        raise keyring.errors.NoKeyringError("no backend on this host")
+
+    monkeypatch.setattr(keyring, "get_password", no_backend)
     fallback = FileBackend()
     fallback.set("app", "name", value=SECRET)
     got = KeyringBackend(fallback=fallback).get("app", "name")
     assert isinstance(got, Secret)
     assert got.reveal() == SECRET
+
+
+def test_get_fails_closed_on_a_keyring_error_even_with_a_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A present-but-erroring keyring must NOT silently serve the (stale/attacker-planted) file
+    # value in place of the authoritative keyring value.
+    def boom(service: str, username: str) -> str:
+        raise RuntimeError("keyring is locked")
+
+    _install_fake_keyring(monkeypatch, get=boom)
+    fallback = FileBackend()
+    fallback.set("app", "name", value="stale_value")
+    with pytest.raises(CredentialsError):
+        KeyringBackend(fallback=fallback).get("app", "name")
+
+
+def test_set_fails_closed_on_a_keyring_error_and_writes_no_plaintext(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A keyring write error must NOT downgrade to a plaintext file write (which would report
+    # success while the keyring's old value keeps shadowing this write on recovery).
+    def boom(service: str, username: str, password: str) -> None:
+        raise RuntimeError("keyring is locked")
+
+    _install_fake_keyring(monkeypatch, set_=boom)
+    fallback = FileBackend()
+    with pytest.raises(CredentialsError):
+        KeyringBackend(fallback=fallback).set("app", "name", value=SECRET)
+    assert fallback.get("app", "name") is None   # nothing was written to the fallback
 
 
 def test_keyring_hit_returns_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
