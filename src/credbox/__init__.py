@@ -7,6 +7,9 @@ and never imports an optional extra (``keyring``/``cryptography``).
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
 from credbox.atomic import write_bytes_atomic, write_text_atomic
 from credbox.backends import (
     FileBackend,
@@ -16,6 +19,7 @@ from credbox.backends import (
     file_backend,
     keyring_backend,
 )
+from credbox.credentials import Credentials
 from credbox.environment import (
     colliding_env_var_prefixes,
     env_var_prefix,
@@ -45,7 +49,13 @@ from credbox.runtime import runtime_dir
 from credbox.scrub import scrub_exception, scrub_secrets
 from credbox.secret import Secret, mask_secret
 
+try:
+    __version__ = _version("credbox")
+except PackageNotFoundError:   # running from a source tree that is not installed as "credbox"
+    __version__ = "0.1.0"
+
 __all__ = [
+    "__version__",
     # errors
     "CredBoxError",
     "CredentialsError",
@@ -54,6 +64,8 @@ __all__ = [
     "InvalidAppNameError",
     "DecryptionError",
     "MissingExtraError",
+    # resolver facade
+    "Credentials",
     # value type
     "Secret",
     "mask_secret",
