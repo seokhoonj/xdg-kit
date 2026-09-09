@@ -137,10 +137,11 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
   copy from the fallback file. When *absent* (no backend on a server, cron, a container), every
   operation falls back to the file store with a one-time, content-free warning — so a user who
   turned the keyring on learns the value went to the file, never a silent downgrade. A *present but
-  failing* keyring still lets `get`/`set` fall back, but `unset` fails closed rather than report a
-  delete that may not have happened. (One caveat: reconciliation runs only keyring → file; a value
-  written to the file while the keyring was down is not migrated back, so re-set the key while the
-  keyring is reachable.)
+  failing* keyring (locked, a transient error) **fails closed**: every operation raises rather than
+  silently write plaintext or serve a stale value — the file fallback is reached only when no
+  keyring backend exists *at all*. (One caveat: reconciliation runs only keyring → file; a value
+  written to the file while the keyring was structurally absent is not migrated back, so re-set the
+  key while the keyring is reachable.)
 - **Encrypted file** (`[crypt]`) — a single AES-GCM blob keyed by an Argon2id hash of a passphrase.
   It is **terminal**: a wrong passphrase or a tampered file fails closed with a content-free
   `DecryptionError`, never a plaintext downgrade. The whole header is authenticated (AES-GCM AAD),
