@@ -142,6 +142,29 @@ def test_lone_surrogate_passphrase_roundtrips() -> None:
     assert got is not None and got.reveal() == SECRET
 
 
+def test_infinite_kdf_param_in_header_fails_closed_not_overflow() -> None:
+    # A tampered header param like {"t": 1e999} parses to float('inf'); int(inf) raises
+    # OverflowError during key re-derivation, BEFORE the AAD/tag check. It must fold into a
+    # content-free DecryptionError, not escape as an OverflowError whose frame retains
+    # passphrase/blob.
+    backend = _backend()
+    backend.set("myapp", "api_key", value=SECRET)
+    path = backend.path("myapp")
+    blob = path.read_bytes()
+    header_len = int.from_bytes(blob[:_HEADER_LEN_BYTES], "big")
+    header = json.loads(blob[_HEADER_LEN_BYTES:_HEADER_LEN_BYTES + header_len])
+    rest = blob[_HEADER_LEN_BYTES + header_len:]
+    header["t"] = 1e999   # -> float('inf'); int(inf) raises OverflowError
+    new_header = json.dumps(header, sort_keys=True).encode("utf-8")
+    path.write_bytes(len(new_header).to_bytes(_HEADER_LEN_BYTES, "big") + new_header + rest)
+    with pytest.raises(DecryptionError) as excinfo:
+        _backend().get("myapp", "api_key")
+    err = excinfo.value
+    assert SECRET not in str(err)
+    assert err.__cause__ is None
+    assert err.__context__ is None
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")

@@ -3,6 +3,7 @@ content-free CredentialsError for a malformed store (the leak guarantee)."""
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,28 @@ from credbox.errors import CredentialsError
 from credbox.secret import Secret
 
 SECRET = "sk_live_TOPSECRET_0123456789"
+
+
+def test_concurrent_sets_from_many_threads_all_survive() -> None:
+    # The store set is a read-modify-write; without serialization two threads that both read the
+    # old map would each write back only their own key and the last writer would drop the other's.
+    # exclusive_store_lock (a per-path thread lock + OS lock) must keep every concurrent write.
+    # A barrier releases all threads at once to maximise overlap; each uses its own backend
+    # instance so the per-path lock is exercised across instances, not just within one.
+    count = 24
+    barrier = threading.Barrier(count)
+
+    def writer(i: int) -> None:
+        barrier.wait()
+        FileBackend().set("myapp", f"k{i}", value=f"v{i}")
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert FileBackend().names("myapp") == sorted(f"k{i}" for i in range(count))
 
 
 def test_set_then_get_returns_a_secret() -> None:

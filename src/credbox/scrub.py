@@ -8,10 +8,12 @@ chain and scrubs each node's ``args``, its transport URLs (``url``, ``request.ur
 ``response.url``), and its ``__notes__`` in place. Both are best-effort: they run on the error
 path, where a second failure would mask the first, so any *ordinary* exception while inspecting a
 node is swallowed. The one carve-out is ``MemoryError`` (and ``KeyboardInterrupt`` / ``SystemExit``,
-which are not ``Exception`` and propagate anyway): it is re-raised rather than swallowed, because
-swallowing it would return the still-unscrubbed, secret-bearing text as the function's result --
-a worse leak than the bare ``MemoryError``, whose own ``str`` carries no secret. The caller
-supplies the secret *values* to redact; this module never reads a store.
+which are not ``Exception`` and propagate anyway): it is re-raised rather than swallowed. This is
+the lesser of two leaks, not a leak-free path -- swallowing returns the still-unscrubbed,
+secret-bearing text as the function's result (a certain leak into the log sink), whereas the
+propagating ``MemoryError`` exposes this frame's ``secret_values`` only to a handler that dumps
+frame-locals (its own ``str`` carries no secret). The caller supplies the secret *values* to
+redact; this module never reads a store.
 """
 
 from __future__ import annotations

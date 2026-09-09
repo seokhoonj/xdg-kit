@@ -71,11 +71,16 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
                 os.fsync(handle.fileno())   # durable before the rename
             os.replace(temp_path, path)
             _fsync_dir(path.parent)         # make the rename itself durable
-        except OSError:
+        except BaseException:
+            # Catch BaseException, not just OSError: a KeyboardInterrupt (Ctrl-C at the no-echo
+            # `set` prompt) or MemoryError raised mid-write must still remove the temp file, which
+            # for the plaintext FileBackend holds the secret store. The bare `raise` re-propagates
+            # unchanged -- a genuine OSError still falls through to the wrapping handler below;
+            # an interrupt/OOM propagates raw rather than being disguised as a write failure.
             try:
                 temp_path.unlink(missing_ok=True)
             except OSError:
-                pass   # cleanup is best-effort; never mask the original write failure below
+                pass   # cleanup is best-effort; never mask the original failure being re-raised
             raise
     except OSError as err:
         raise CredBoxError(f"could not write {path}: {err}") from err

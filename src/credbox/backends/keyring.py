@@ -193,12 +193,14 @@ def _keyring_operation_error(app: str, name: str) -> CredentialsError:
 # whose frame retains `raw`.
 #
 # The catch is deliberately total -- it does NOT re-raise MemoryError the way storecodec/scrub do.
-# Those run with no secret in frame; _try_keyring_set runs with `raw` bound, so re-raising ANY
-# exception (MemoryError included) would keep this frame alive on the propagating traceback and
-# carry `raw` out with it. Leak-containment therefore outranks surfacing a MemoryError here: a
-# swallowed OOM degrades to a status ("failed" -> fail-closed raise; "no_backend" -> fallback),
-# never a plaintext-bearing traceback. BaseException (KeyboardInterrupt/SystemExit) is not an
-# Exception, so it still propagates -- and it carries no secret text of its own.
+# All three run with a secret in frame (_try_keyring_set holds `raw`), so the difference is not
+# "who has a secret" but what swallowing PRODUCES. storecodec/scrub let MemoryError propagate only
+# because their swallow-alternative is worse than the frame-locals exposure -- a misclassified
+# fault, or a returned still-unscrubbed string. Here swallowing yields a safe status instead ("failed"
+# -> fail-closed raise; "no_backend" -> file fallback), so there is nothing to trade: folding a
+# swallowed OOM to a status keeps `raw` off the propagating traceback at no cost. BaseException
+# (KeyboardInterrupt/SystemExit) is not an Exception, so it still propagates -- carrying no secret
+# text of its own, though `raw` would sit in this frame; that is the interpreter tearing down.
 
 
 def _try_keyring_get(app: str, name: str) -> tuple[KeyringStatus, str | None]:
@@ -256,8 +258,10 @@ def _warn_keyring_fallback_once() -> None:
     backend instead. Content-free: it never interpolates the third-party error, whose text could
     embed a secret."""
     global _warned_keyring_fallback
+    if _warned_keyring_fallback:
+        return   # fast path: once warned, every later fallback op skips the lock entirely
     with _warn_lock:
-        if _warned_keyring_fallback:
+        if _warned_keyring_fallback:   # re-check under the lock (double-checked locking)
             return
         _warned_keyring_fallback = True
     print(

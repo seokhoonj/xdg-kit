@@ -130,6 +130,19 @@ def test_write_body_failure_cleans_up_temp(tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+def test_non_oserror_mid_write_still_cleans_up_temp(tmp_path, monkeypatch):
+    # A KeyboardInterrupt/MemoryError raised mid-write (not an OSError) must still remove the
+    # secret-bearing temp file -- otherwise a Ctrl-C at the write leaves the plaintext on disk.
+    # The interrupt propagates unchanged (NOT wrapped in CredBoxError).
+    def boom(fd):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("credbox.atomic.os.fsync", boom)
+    with pytest.raises(KeyboardInterrupt):
+        write_bytes_atomic(tmp_path / "f", b"secret-data")
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
 @posix_only
 def test_fchmod_pins_mode_before_first_write(tmp_path, monkeypatch):
     # the mode must be pinned before any secret bytes land, so the temp file never holds the
