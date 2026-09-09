@@ -1,14 +1,14 @@
-"""One cross-platform exclusive file-lock primitive, shared by the two callers that need
-it: ``locking.FileLock`` (a non-blocking single-instance guard) and ``backends`` (a
-blocking serializer around a store's read-modify-write).
+"""One cross-platform exclusive file-lock primitive, shared by the two callers that need it:
+``locking.FileLock`` (a non-blocking single-instance guard) and the file backends (a blocking
+serializer around a store's read-modify-write).
 
-Built on ``fcntl.flock`` (POSIX) and ``msvcrt.locking`` (Windows) -- both released by the
-OS automatically when the process exits, even on a crash, so there is no stale lock to
-clean up. On a platform with neither, locking is a no-op that always "succeeds", leaving
-the caller's own in-process guard as the only serialization.
+Built on ``fcntl.flock`` (POSIX) and ``msvcrt.locking`` (Windows) -- both released by the OS
+automatically when the process exits, even on a crash, so there is no stale lock to clean up.
+On a platform with neither, locking is a no-op that always "succeeds", leaving the caller's
+own in-process guard as the only serialization.
 
-The caller owns the lock file (where it lives, how it is opened); this module only takes
-and releases the lock on an already-open handle.
+The caller owns the lock file (where it lives, how it is opened); this module only takes and
+releases the lock on an already-open handle.
 """
 
 from __future__ import annotations

@@ -1,162 +1,97 @@
-"""The xdg-kit command: store, read (masked), list, remove, inspect, and check."""
+"""Tests for the credbox CLI, focused on the leak-surface discipline (§13): only get --reveal
+writes a raw secret to stdout; everything else is masked/content-free, and no path prints a
+traceback."""
 
 from __future__ import annotations
 
 import pytest
 
-from xdg_kit import __version__
-from xdg_kit.backends import FileBackend
-from xdg_kit.cli import main
-from xdg_kit.paths import config_dir
+from credbox.backends.file import FileBackend
+from credbox.cli import main
+from credbox.secret import mask_secret
+
+SECRET = "sk_live_0123456789abcdef"
 
 
-def test_set_with_value_stores(capsys):
-    assert main(["set", "nw", "K", "--value", "sk-abcdef"]) == 0
-    assert FileBackend().get("nw", "K") == "sk-abcdef"
-    assert "stored K for nw" in capsys.readouterr().out
-
-
-def test_version_flag_prints_and_exits_zero(capsys):
-    """`xdg-kit --version` prints the version at the top level and exits 0 -- not shoved
-    behind a required subcommand (argparse's version action raises SystemExit)."""
-    with pytest.raises(SystemExit) as exc:
-        main(["--version"])
-    assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == f"xdg-kit {__version__}"
-
-
-def test_version_wins_over_trailing_subcommand(capsys):
-    """--version short-circuits before the required-subcommand check, so it still prints
-    and exits 0 even with a subcommand after it."""
-    with pytest.raises(SystemExit) as exc:
-        main(["--version", "set"])
-    assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == f"xdg-kit {__version__}"
-
-
-def test_no_arguments_exits_with_usage_error(capsys):
-    """With no subcommand argparse raises SystemExit(2) and writes usage to stderr -- a
-    usage error, not a returned code (main's except clauses catch XdgKitError, not this)."""
-    with pytest.raises(SystemExit) as exc:
-        main([])
-    assert exc.value.code == 2
-    assert "usage:" in capsys.readouterr().err
-
-
-def test_set_empty_value_is_refused(capsys):
-    assert main(["set", "nw", "K", "--value", ""]) == 1
-    assert "empty value" in capsys.readouterr().err
-
-
-def test_set_whitespace_only_value_is_refused(capsys):
-    """A whitespace-only value reads back as absent (values are stripped on read), so `set`
-    must refuse it rather than report a false success for a secret no read can retrieve."""
-    assert main(["set", "nw", "K", "--value", "   "]) == 1
-    assert "empty value" in capsys.readouterr().err
-    assert FileBackend().get("nw", "K") is None   # nothing was stored
-
-
-def test_get_masks_by_default(capsys):
-    main(["set", "nw", "K", "--value", "sk-abcdef"])
+def test_set_then_masked_get(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["set", "myapp", "api_key", "--value", SECRET]) == 0
     capsys.readouterr()
-    assert main(["get", "nw", "K"]) == 0
+    assert main(["get", "myapp", "api_key"]) == 0
     out = capsys.readouterr().out.strip()
-    assert out == "sk***ef"                 # exact mask, not the whole secret
-    assert "sk-abcdef" not in out
+    assert out == mask_secret(SECRET)   # exactly the mask, not merely "not the secret"
+    assert SECRET not in out
 
 
-def test_get_reveal_prints_full(capsys):
-    main(["set", "nw", "K", "--value", "sk-abcdef"])
+def test_get_reveal_writes_raw_to_stdout_and_nothing_to_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(["set", "myapp", "api_key", "--value", SECRET])
     capsys.readouterr()
-    main(["get", "nw", "K", "--reveal"])
-    assert capsys.readouterr().out.strip() == "sk-abcdef"
+    assert main(["get", "myapp", "api_key", "--reveal"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == SECRET
+    assert SECRET not in captured.err
 
 
-def test_get_reads_store_not_env(monkeypatch, capsys):
-    main(["set", "nw", "K", "--value", "stored"])
-    monkeypatch.setenv("K", "from-env")
+def test_get_missing_reports_on_stderr_only(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["get", "myapp", "absent"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "not set" in captured.err
+
+
+def test_set_empty_value_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["set", "myapp", "k", "--value", "   "]) == 1
+    assert "empty value" in capsys.readouterr().err
+
+
+def test_list_prints_names(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["set", "myapp", "a", "--value", "1"])
+    main(["set", "myapp", "b", "--value", "2"])
     capsys.readouterr()
-    main(["get", "nw", "K", "--reveal"])
-    assert capsys.readouterr().out.strip() == "stored"   # the store it manages, not env
+    assert main(["list", "myapp"]) == 0
+    assert capsys.readouterr().out.split() == ["a", "b"]
 
 
-def test_get_resolve_walks_env(monkeypatch, capsys):
-    main(["set", "nw", "K", "--value", "stored"])
-    monkeypatch.setenv("K", "from-env")
+def test_unset_removes_the_key(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["set", "myapp", "k", "--value", "v"])
     capsys.readouterr()
-    main(["get", "nw", "K", "--reveal", "--resolve"])
-    assert capsys.readouterr().out.strip() == "from-env"   # env wins in full resolution
-
-
-def test_get_missing_returns_1(capsys):
-    assert main(["get", "nw", "MISSING"]) == 1
-
-
-def test_list_shows_names(capsys):
-    main(["set", "nw", "A", "--value", "1"])
-    main(["set", "nw", "B", "--value", "2"])
+    assert main(["unset", "myapp", "k"]) == 0
     capsys.readouterr()
-    main(["list", "nw"])
-    assert capsys.readouterr().out.split() == ["A", "B"]
+    assert main(["get", "myapp", "k"]) == 1
 
 
-def test_unset_removes(capsys):
-    main(["set", "nw", "K", "--value", "v"])
-    assert main(["unset", "nw", "K"]) == 0
-    assert FileBackend().get("nw", "K") is None
-
-
-def test_path_prints_credentials_file(capsys):
-    main(["path", "nw"])
-    assert capsys.readouterr().out.strip().endswith("nw/credentials.json")
-
-
-def test_dirs_prints_five_kinds(capsys):
-    main(["dirs", "nw"])
-    out = capsys.readouterr().out
-    for kind in ("config", "data", "state", "cache", "runtime"):
-        assert kind in out
-
-
-def test_doctor_reports_count(capsys):
-    main(["set", "nw", "K", "--value", "v"])
-    capsys.readouterr()
-    assert main(["doctor", "nw"]) == 0
-    assert "checked 1" in capsys.readouterr().out
-
-
-def test_bad_app_name_is_usage_error(capsys):
-    assert main(["path", "../evil"]) == 2
+def test_invalid_app_name_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["get", "bad/app", "k"]) == 2
     assert "error" in capsys.readouterr().err
 
 
-def test_set_without_value_noninteractive_is_usage_error(capsys, monkeypatch):
-    # no --value and no interactive stdin: getpass raises EOFError, which must surface as a
-    # clean usage error (exit 2), not a bare traceback
-    def no_stdin(prompt):
-        raise EOFError
-
-    monkeypatch.setattr("xdg_kit.cli.getpass.getpass", no_stdin)
-    assert main(["set", "nw", "K"]) == 2
-    assert "not interactive" in capsys.readouterr().err
-
-
-def test_doctor_discovers_apps_when_none_named(capsys):
-    main(["set", "appone", "K", "--value", "v"])
-    main(["set", "apptwo", "K", "--value", "v"])
+def test_malformed_store_get_prints_no_secret_and_no_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(["set", "myapp", "k", "--value", "v"])   # create the app dir
+    path = FileBackend().path("myapp")
+    path.write_bytes(b"{not json LEAKY_XYZ")
     capsys.readouterr()
-    assert main(["doctor"]) == 0                       # no app args -> discover them
-    assert "checked 2" in capsys.readouterr().out
+    rc = main(["get", "myapp", "k"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "LEAKY_XYZ" not in captured.out + captured.err   # neither stream carries the file bytes
+    assert "Traceback" not in captured.err
 
 
-def test_doctor_skips_invalid_neighbor_directory(capsys):
-    # a neighbor directory whose name is not a valid app segment must be skipped, not abort
-    # the whole sweep -- otherwise one stray folder under the config base breaks `doctor`
-    main(["set", "appone", "K", "--value", "v"])
-    config_base = config_dir("appone").parent
-    stray = config_base / "not a valid app"          # a space -> fails app_dir_segment
-    stray.mkdir()
-    (stray / "credentials.json").write_text("{}")
-    capsys.readouterr()
-    assert main(["doctor"]) == 0                       # stray neighbor does not abort discovery
-    assert "checked 1" in capsys.readouterr().out      # only the valid app is counted
+def test_missing_keyring_extra_prints_pip_hint(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        "credbox.backends.factory.importlib.util.find_spec",
+        lambda name, *a, **k: None if name == "keyring" else real(name, *a, **k),
+    )
+    rc = main(["get", "myapp", "k", "--keyring"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "pip install credbox[keyring]" in captured.err
+    assert "Traceback" not in captured.err

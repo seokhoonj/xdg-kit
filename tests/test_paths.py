@@ -1,92 +1,128 @@
-"""Directory resolution: XDG variables, home fallback, per-app overrides, and the
-app-name guard against path traversal."""
+"""Tests for the XDG and native path resolvers and app-name validation."""
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from xdg_kit.errors import XdgKitError
-from xdg_kit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
+from credbox.errors import CredBoxError, InvalidAppNameError
+from credbox.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
+
+_XDG_VARS = [
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
+    "MYAPP_DATA_DIR",
+    "MYAPP_STATE_DIR",
+    "LOCALAPPDATA",
+    "CREDBOX_LAYOUT",
+]
 
 
-def test_config_dir_uses_xdg_config_home(tmp_path):
-    assert config_dir("newswatcher") == tmp_path / "config" / "newswatcher"
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+    """A clean environment: no XDG/override vars, HOME under a temp dir."""
+    for var in _XDG_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    yield
 
 
-def test_each_kind_has_its_own_base(tmp_path):
-    assert data_dir("nw") == tmp_path / "data" / "nw"
-    assert state_dir("nw") == tmp_path / "state" / "nw"
-    assert cache_dir("nw") == tmp_path / "cache" / "nw"
+# --- app_dir_segment validation ------------------------------------------------
+
+def test_app_dir_segment_accepts_valid_names() -> None:
+    for name in ("myapp", "my-app", "a.b_c", "App1"):
+        assert app_dir_segment(name) == name
 
 
-def test_falls_back_to_home_when_xdg_unset(tmp_path, monkeypatch):
-    monkeypatch.delenv("XDG_CONFIG_HOME")
-    assert config_dir("nw") == tmp_path / "home" / ".config" / "nw"
+@pytest.mark.parametrize("bad", ["", "a/b", "..", ".", "-lead", "trail-", "a b", "a/../b"])
+def test_app_dir_segment_rejects_unsafe_names(bad: str) -> None:
+    with pytest.raises(InvalidAppNameError):
+        app_dir_segment(bad)
 
 
-def test_relative_xdg_value_is_ignored(monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_CONFIG_HOME", "relative/path")   # spec: a relative base is ignored
-    assert config_dir("nw") == tmp_path / "home" / ".config" / "nw"
-
-
-def test_per_app_data_dir_override_wins_and_is_used_as_is(monkeypatch, tmp_path):
-    elsewhere = tmp_path / "big-disk" / "archive"
-    monkeypatch.setenv("NW_DATA_DIR", str(elsewhere))
-    assert data_dir("nw") == elsewhere   # no app segment appended
-
-
-def test_override_env_var_folds_punctuation(monkeypatch, tmp_path):
-    elsewhere = tmp_path / "vol"
-    monkeypatch.setenv("OPENDART_CLIENT_DATA_DIR", str(elsewhere))
-    assert data_dir("opendart-client") == elsewhere
-
-
-def test_config_dir_has_no_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("NW_CONFIG_DIR", str(tmp_path / "ignored"))
-    assert config_dir("nw") == tmp_path / "config" / "nw"
-
-
-@pytest.mark.parametrize("valid_app_name", ["nw", "newswatcher", "opendart-client", "kis-trader", "a.b_c"])
-def test_valid_app_names_pass(valid_app_name):
-    assert app_dir_segment(valid_app_name) == valid_app_name
-
-
-@pytest.mark.parametrize("invalid_app_name", ["", ".", "..", "../etc", "a/b", "a\\b", "/abs", "-lead", "trail-", "sp ace"])
-def test_traversal_and_junk_names_rejected(invalid_app_name):
+def test_invalid_app_name_is_also_a_value_error() -> None:
     with pytest.raises(ValueError):
-        app_dir_segment(invalid_app_name)
+        app_dir_segment("a/b")
 
 
-def test_bad_app_name_rejected_by_dir_functions(invalid_app_name="../../etc"):
-    with pytest.raises(ValueError):
-        config_dir(invalid_app_name)
+# --- xdg layout ----------------------------------------------------------------
+
+def test_config_dir_uses_xdg_config_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    assert config_dir("myapp") == tmp_path / "cfg" / "myapp"
 
 
-def test_absolute_xdg_value_is_expanded(monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdgdata"))
-    assert data_dir("nw") == tmp_path / "xdgdata" / "nw"
-    assert isinstance(config_dir("nw"), Path)
+def test_config_dir_falls_back_to_home_config(tmp_path: Path) -> None:
+    assert config_dir("myapp") == tmp_path / ".config" / "myapp"
 
 
-def test_blank_xdg_value_is_ignored(monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_CONFIG_HOME", "   ")   # whitespace-only reads as unset
-    assert config_dir("nw") == tmp_path / "home" / ".config" / "nw"
+def test_data_and_state_and_cache_home_fallbacks(tmp_path: Path) -> None:
+    assert data_dir("myapp") == tmp_path / ".local" / "share" / "myapp"
+    assert state_dir("myapp") == tmp_path / ".local" / "state" / "myapp"
+    assert cache_dir("myapp") == tmp_path / ".cache" / "myapp"
 
 
-def test_per_app_state_dir_override_wins_and_is_used_as_is(monkeypatch, tmp_path):
-    elsewhere = tmp_path / "vol" / "state"
-    monkeypatch.setenv("NW_STATE_DIR", str(elsewhere))
-    assert state_dir("nw") == elsewhere   # no app segment appended
+def test_per_app_override_wins_for_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MYAPP_DATA_DIR", str(tmp_path / "elsewhere"))
+    assert data_dir("myapp") == tmp_path / "elsewhere"
 
 
-def test_no_home_and_no_xdg_raises_xdg_kit_error(monkeypatch):
-    monkeypatch.delenv("XDG_CONFIG_HOME")
+def test_relative_xdg_var_is_ignored(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", "relative/cfg")
+    assert config_dir("myapp") == tmp_path / ".config" / "myapp"
 
-    def no_home(*args, **kwargs):
-        raise RuntimeError("no home directory")
 
-    monkeypatch.setattr(Path, "home", no_home)
-    with pytest.raises(XdgKitError):
-        config_dir("nw")
+# --- native layout -------------------------------------------------------------
+
+def test_native_macos_collapses_config_data_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    support = tmp_path / "Library" / "Application Support" / "myapp"
+    assert config_dir("myapp", layout="native") == support
+    assert data_dir("myapp", layout="native") == support
+    assert state_dir("myapp", layout="native") == support
+
+
+def test_native_macos_cache_uses_library_caches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert cache_dir("myapp", layout="native") == tmp_path / "Library" / "Caches" / "myapp"
+
+
+def test_native_windows_uses_localappdata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    base = tmp_path / "AppData" / "Local"
+    assert config_dir("myapp", layout="native") == base / "myapp"
+    assert cache_dir("myapp", layout="native") == base / "myapp" / "Cache"
+
+
+def test_native_on_linux_equals_xdg(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert config_dir("myapp", layout="native") == config_dir("myapp", layout="xdg")
+
+
+def test_no_home_raises_credbox_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HOME", raising=False)
+
+    def _no_home() -> Path:
+        raise RuntimeError("no home")
+
+    monkeypatch.setattr("credbox.paths.Path.home", staticmethod(_no_home))
+    with pytest.raises(CredBoxError):
+        config_dir("myapp")

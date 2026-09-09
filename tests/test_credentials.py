@@ -1,110 +1,83 @@
-"""The four-tier resolution: override > env > shared store > app store."""
+"""Tests for the Credentials facade: four-tier resolution, Secret returns, and content-free
+require()."""
 
 from __future__ import annotations
 
 import pytest
 
-from xdg_kit.backends import FileBackend
-from xdg_kit.credentials import Credentials, get_secret, require_secret, secret_names, set_secret
-from xdg_kit.errors import CredentialsError, InvalidAppNameError
+from credbox.credentials import Credentials
+from credbox.errors import CredentialsError
+from credbox.secret import Secret
 
 
-def test_override_beats_everything(monkeypatch):
-    monkeypatch.setenv("K", "from-env")
-    creds = Credentials("nw")
-    creds.set("K", value="from-app")
-    assert creds.secret("K", override="explicit") == "explicit"
+def test_secret_from_own_store_is_a_secret() -> None:
+    creds = Credentials("myapp")
+    creds.set("api_key", value="v")
+    got = creds.secret("api_key")
+    assert isinstance(got, Secret)
+    assert got.reveal() == "v"
 
 
-def test_env_beats_stores(monkeypatch):
-    monkeypatch.setenv("K", "from-env")
-    creds = Credentials("nw")
-    creds.set("K", value="from-app")
-    assert creds.secret("K") == "from-env"
+def test_override_wins_over_store() -> None:
+    creds = Credentials("myapp")
+    creds.set("api_key", value="stored")
+    assert creds.secret("api_key", override="explicit").reveal() == "explicit"  # type: ignore[union-attr]
 
 
-def test_shared_store_beats_app_store():
-    FileBackend().set("auth", "EXAMPLE_API_KEY", value="shared-key")
-    FileBackend().set("nw", "EXAMPLE_API_KEY", value="app-key")
-    creds = Credentials("nw", shared=["auth"])
-    assert creds.secret("EXAMPLE_API_KEY") == "shared-key"
+def test_env_beats_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    creds = Credentials("myapp")
+    creds.set("API_TOKEN", value="stored")
+    monkeypatch.setenv("API_TOKEN", "from_env")
+    assert creds.secret("API_TOKEN").reveal() == "from_env"  # type: ignore[union-attr]
 
 
-def test_falls_through_to_app_store_when_shared_absent():
-    FileBackend().set("nw", "OPENDART_KEY", value="app-only")
-    creds = Credentials("nw", shared=["auth"])
-    assert creds.secret("OPENDART_KEY") == "app-only"
+def test_shared_store_consulted_before_own() -> None:
+    Credentials("auth").set("shared_key", value="from_auth")
+    creds = Credentials("myapp", shared=["auth"])
+    assert creds.secret("shared_key").reveal() == "from_auth"  # type: ignore[union-attr]
 
 
-def test_secret_none_when_unset_everywhere():
-    assert Credentials("nw").secret("NOPE") is None
+def test_own_store_used_when_not_in_shared() -> None:
+    Credentials("myapp").set("own", value="mine")
+    creds = Credentials("myapp", shared=["auth"])
+    assert creds.secret("own").reveal() == "mine"  # type: ignore[union-attr]
 
 
-def test_blank_override_falls_through(monkeypatch):
-    monkeypatch.setenv("K", "from-env")
-    assert Credentials("nw").secret("K", override="   ") == "from-env"
+def test_unset_everywhere_returns_none() -> None:
+    assert Credentials("myapp").secret("nope") is None
 
 
-def test_require_raises_when_unset():
-    with pytest.raises(CredentialsError):
-        Credentials("nw").require("NOPE")
+def test_require_raises_when_unset() -> None:
+    with pytest.raises(CredentialsError) as excinfo:
+        Credentials("myapp").require("nope")
+    assert "nope" in str(excinfo.value)   # the name is safe to name; there is no value to leak
 
 
-def test_require_returns_value(monkeypatch):
-    monkeypatch.setenv("K", "v")
-    assert Credentials("nw").require("K") == "v"
+def test_set_strips_surrounding_whitespace() -> None:
+    creds = Credentials("myapp")
+    creds.set("k", value="  spaced  ")
+    assert creds.secret("k").reveal() == "spaced"  # type: ignore[union-attr]
 
 
-def test_set_writes_to_own_store_only():
-    creds = Credentials("nw", shared=["auth"])
-    creds.set("K", value="v")
-    assert FileBackend().get("nw", "K") == "v"
-    assert FileBackend().get("auth", "K") is None   # never the shared store
-
-
-def test_module_level_helpers(monkeypatch):
-    set_secret("nw", "K", value="v")
-    assert get_secret("nw", "K") == "v"
-    assert secret_names("nw") == ["K"]
-    assert require_secret("nw", "K") == "v"
-
-
-def test_invalid_app_or_shared_name_rejected():
-    with pytest.raises(InvalidAppNameError):
-        Credentials("../evil")
-    with pytest.raises(InvalidAppNameError):
-        Credentials("nw", shared=["../evil"])
-
-
-def test_repr_is_secret_safe():
-    creds = Credentials("nw", shared=["auth"])
-    creds.set("K", value="super-secret-value")
-    text = repr(creds)
-    assert "nw" in text and "auth" in text and "FileBackend" in text
-    assert "super-secret-value" not in text
-
-
-def test_blank_value_falls_through_each_tier(monkeypatch):
-    # a blank (whitespace-only) value at any tier reads as absent and falls through to the
-    # next: override -> env -> shared -> app. set_secret refuses to store a blank, so the
-    # shared blank is planted straight through the backend -- the shape a hand-edited or
-    # legacy store could still hold.
-    FileBackend().set("auth", "K", value="   ")   # a blank already sitting in the shared store
-    set_secret("nw", "K", value="from-app")       # real value in the app's own store
-    creds = Credentials("nw", shared=["auth"])
-    # blank override skipped, env unset, blank shared skipped -> the app value wins
-    assert creds.secret("K", override="   ") == "from-app"
-    # a blank environment value also falls through (env unset would too)
-    monkeypatch.setenv("K", "   ")
-    assert creds.secret("K") == "from-app"
-
-
-def test_set_refuses_a_blank_value():
+def test_set_refuses_a_blank_value() -> None:
     with pytest.raises(ValueError):
-        set_secret("nw", "K", value="   ")   # would list yet resolve as absent -- refused
-    assert secret_names("nw") == []          # nothing stored
+        Credentials("myapp").set("k", value="   ")
 
 
-def test_set_strips_surrounding_whitespace_before_storing():
-    set_secret("nw", "K", value="  from-app\n")   # a pasted value's trailing newline
-    assert get_secret("nw", "K") == "from-app"    # stored and resolved without the whitespace
+def test_set_accepts_a_secret() -> None:
+    creds = Credentials("myapp")
+    creds.set("k", value=Secret("v"))
+    assert creds.secret("k").reveal() == "v"  # type: ignore[union-attr]
+
+
+def test_repr_never_shows_a_value() -> None:
+    creds = Credentials("myapp")
+    creds.set("k", value="topsecret_value")
+    assert "topsecret_value" not in repr(creds)
+
+
+def test_names_lists_own_store_sorted() -> None:
+    creds = Credentials("myapp")
+    creds.set("b_key", value="1")
+    creds.set("a_key", value="2")
+    assert creds.names() == ["a_key", "b_key"]

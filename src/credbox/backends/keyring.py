@@ -1,0 +1,256 @@
+"""The OS keyring backend ([keyring] extra), with a file ``fallback`` for headless machines.
+
+When the OS keyring has no backend (cron, containers, servers) the operation is delegated to
+``fallback`` in full and a one-time, content-free warning is printed so the user knows their
+secrets are in the file, not the keyring. When the keyring works it is authoritative, and a
+successful write/delete also clears any stale plaintext copy from the fallback.
+
+**Leak contract (the P1 fix).** A keyring call can raise a third-party exception whose ``str()``
+embeds a secret. Every such exception is caught *inside* a returning-frame helper
+(``_try_keyring_*``) and never escapes; the ``CredentialsError`` a caller sees is built from safe
+fields only (``app``, ``name``, a fixed phrase) and raised where no exception is in flight, so
+both ``__cause__`` AND ``__context__`` are ``None`` (a bare ``raise ... from None`` would leave
+the secret-bearing exception on ``__context__``). The warn-once message is content-free too.
+
+One direction cannot be fully closed: a value written to the file fallback *while the keyring is
+down* is not migrated into the keyring on recovery. If on recovery the keyring holds no entry for
+that name, ``get`` consults the file and returns it; but if the keyring still holds an older value,
+that older value shadows the newer file value (the keyring is authoritative on a conflict).
+Re-set the key while the keyring is reachable.
+"""
+
+from __future__ import annotations
+
+import sys
+from typing import Literal
+
+from credbox.backends._store import normalize_secret_value
+from credbox.backends.protocol import SecretBackend
+from credbox.errors import CredentialsError, NoKeyringError
+from credbox.secret import Secret
+
+__all__ = ["KeyringBackend"]
+
+# The closed vocabulary the returning-frame helpers report. Typed so mypy --strict rejects an
+# off-vocabulary literal at either the producer or a call site -- the branch that chooses between a
+# content-free raise and a file fallback must not mis-branch on a typo.
+KeyringStatus = Literal["ok", "no_backend", "failed"]
+
+_warned_keyring_fallback = False
+
+
+class KeyringBackend:
+    """Secrets in the OS keyring (service = ``app``, username = ``name``), with a file
+    ``fallback`` for machines where no keyring backend exists."""
+
+    def __init__(self, *, fallback: SecretBackend | None = None) -> None:
+        self._fallback = fallback
+
+    def __repr__(self) -> str:
+        fallback = type(self._fallback).__name__ if self._fallback is not None else None
+        return f"KeyringBackend(fallback={fallback})"
+
+    def get(self, app: str, name: str) -> Secret | None:
+        """Return the keyring value for ``name`` as a ``Secret``, or ``None`` when set nowhere.
+        Falls back to the file ONLY when no keyring backend exists at all (`no_backend`, warning
+        once), and when the keyring is reachable but empty (so a value written to the file while
+        the keyring was structurally absent stays readable after recovery). **Fails closed on a
+        keyring error** -- it does NOT serve a stale file value in place of the authoritative
+        keyring value.
+
+        Raises:
+            NoKeyringError: no keyring backend exists and no fallback is configured.
+            CredentialsError: the keyring is present but the read failed (fail-closed -- the file
+                fallback is NOT consulted on a keyring error), or a consulted fallback file is
+                malformed.
+        """
+        status, raw = _try_keyring_get(app, name)
+        if status == "no_backend":
+            return self._fallback_get(app, name)
+        if status == "failed":
+            # Fail closed: a present-but-erroring keyring must NOT silently serve a stale (or
+            # attacker-planted) file value in place of the authoritative keyring value. Raised
+            # where no exception is in flight (it died in _try_keyring_get), so content-free.
+            raise _keyring_operation_error(app, name)
+        cleaned = normalize_secret_value(raw)
+        if cleaned is not None:
+            return Secret(cleaned)
+        if self._fallback is not None:
+            return self._fallback.get(app, name)
+        return None
+
+    def set(self, app: str, name: str, *, value: str | Secret) -> None:
+        """Store ``value`` in the keyring; a successful write also clears any stale plaintext copy
+        from the fallback file. Falls back to the file ONLY when no keyring backend exists at all
+        (`no_backend`, warning once). **Fails closed on a keyring error** -- it does NOT silently
+        write plaintext to the fallback, which would report success while the keyring's old value
+        keeps shadowing this write on recovery.
+
+        Raises:
+            NoKeyringError: no keyring backend exists and no fallback is configured.
+            CredentialsError: the keyring is present but the write failed (fail-closed -- no
+                plaintext is written to the fallback); or the write succeeded but a stale file copy
+                could not be cleared.
+        """
+        raw = value.reveal() if isinstance(value, Secret) else value
+        status = _try_keyring_set(app, name, raw)
+        if status == "no_backend":
+            self._fallback_set(app, name, raw)
+            return
+        if status == "failed":
+            # Fail closed: do NOT silently write plaintext to the fallback on a keyring error --
+            # that would report success while the keyring's OLD value still shadows this write on
+            # recovery (a rotation that silently does not take effect). Content-free, no in-flight exc.
+            raise _keyring_operation_error(app, name)
+        if self._fallback is not None:
+            try:
+                self._fallback.unset(app, name)
+            except CredentialsError as err:
+                raise CredentialsError(
+                    f"stored {app}/{name} in the keyring, but a stale plaintext copy may remain "
+                    f"in the file store and could not be cleared"
+                ) from err
+
+    def unset(self, app: str, name: str) -> None:
+        """Remove ``name`` from the keyring and from any fallback file copy; an idempotent no-op
+        when absent. Fails closed: a keyring present but erroring on delete raises rather than
+        silently reporting a delete that may not have happened.
+
+        Raises:
+            NoKeyringError: no keyring backend exists and no fallback is configured.
+            CredentialsError: the keyring is present but the delete failed; or the delete
+                succeeded but a stale file copy could not be cleared.
+        """
+        status = _try_keyring_delete(app, name)
+        if status == "no_backend":
+            if self._fallback is not None:
+                _warn_keyring_fallback_once()
+                self._fallback.unset(app, name)
+                return
+            raise _no_backend_error(app, name)
+        if status == "failed":
+            # Keyring present but the delete genuinely failed: do NOT report success while the
+            # secret may still be retrievable. Content-free -- no in-flight exception here.
+            raise _keyring_operation_error(app, name)
+        if self._fallback is not None:
+            try:
+                self._fallback.unset(app, name)
+            except CredentialsError as err:
+                raise CredentialsError(
+                    f"deleted {app}/{name} from the keyring, but a stale plaintext copy may "
+                    f"remain in the file store and could not be cleared"
+                ) from err
+
+    def names(self, app: str) -> list[str]:
+        """The fallback file's stored key names, sorted. The OS keyring cannot enumerate its own
+        keys, so a key stored solely in the keyring is not listed.
+
+        Raises:
+            CredentialsError: the fallback file is present but malformed.
+        """
+        return self._fallback.names(app) if self._fallback is not None else []
+
+    def _fallback_get(self, app: str, name: str) -> Secret | None:
+        """Delegate to the file fallback (the legitimate headless `no_backend` case), warning
+        once; raise `NoKeyringError` when no fallback is configured."""
+        if self._fallback is not None:
+            _warn_keyring_fallback_once()
+            return self._fallback.get(app, name)
+        raise _no_backend_error(app, name)
+
+    def _fallback_set(self, app: str, name: str, raw: str) -> None:
+        if self._fallback is not None:
+            _warn_keyring_fallback_once()
+            self._fallback.set(app, name, value=raw)
+            return
+        raise _no_backend_error(app, name)
+
+
+def _no_backend_error(app: str, name: str) -> NoKeyringError:
+    """A content-free error for "no OS keyring backend, and no fallback", raised where no
+    third-party exception is in flight so ``__cause__`` and ``__context__`` are both ``None``."""
+    return NoKeyringError(
+        f"no OS keyring backend available for {app}/{name} and no fallback is configured"
+    )
+
+
+def _keyring_operation_error(app: str, name: str) -> CredentialsError:
+    """A content-free error for a present-but-erroring keyring (fail-closed), raised where no
+    third-party exception is in flight so ``__cause__`` and ``__context__`` are both ``None``."""
+    return CredentialsError(f"keyring operation failed for {app}/{name}")
+
+
+# --- returning-frame keyring calls (the third-party exception dies here) --------
+#
+# Each helper catches every keyring exception INSIDE its own frame and returns a status string,
+# so the exception never reaches a caller frame. That is what lets KeyringBackend raise a
+# content-free CredentialsError with __context__ == None: at the raise site there is no exception
+# in flight to become the implicit context. The `import keyring` guard is `except Exception` (not
+# just ImportError) because executing keyring's __init__ (backend/D-Bus discovery) can raise a
+# non-ImportError, which must be folded into a status here rather than escape as a raw traceback
+# whose frame retains `raw`.
+
+
+def _try_keyring_get(app: str, name: str) -> tuple[KeyringStatus, str | None]:
+    """Return ``("ok", value)``, ``("no_backend", None)``, or ``("failed", None)``."""
+    try:
+        import keyring
+        import keyring.errors
+    except Exception:
+        return "no_backend", None
+    try:
+        return "ok", keyring.get_password(app, name)
+    except keyring.errors.NoKeyringError:
+        return "no_backend", None
+    except Exception:
+        return "failed", None
+
+
+def _try_keyring_set(app: str, name: str, raw: str) -> KeyringStatus:
+    """Return ``"ok"``, ``"no_backend"``, or ``"failed"``."""
+    try:
+        import keyring
+        import keyring.errors
+    except Exception:
+        return "no_backend"
+    try:
+        keyring.set_password(app, name, raw)
+        return "ok"
+    except keyring.errors.NoKeyringError:
+        return "no_backend"
+    except Exception:
+        return "failed"
+
+
+def _try_keyring_delete(app: str, name: str) -> KeyringStatus:
+    """Return ``"ok"`` (deleted, including an already-absent key), ``"no_backend"``, or
+    ``"failed"``."""
+    try:
+        import keyring
+        import keyring.errors
+    except Exception:
+        return "no_backend"
+    try:
+        keyring.delete_password(app, name)
+        return "ok"
+    except keyring.errors.PasswordDeleteError:
+        return "ok"   # already absent -- unset is idempotent
+    except keyring.errors.NoKeyringError:
+        return "no_backend"
+    except Exception:
+        return "failed"
+
+
+def _warn_keyring_fallback_once() -> None:
+    """Warn once, on stderr, that the OS keyring is unavailable and secrets are going to the file
+    backend instead. Content-free: it never interpolates the third-party error, whose text could
+    embed a secret."""
+    global _warned_keyring_fallback
+    if _warned_keyring_fallback:
+        return
+    _warned_keyring_fallback = True
+    print(
+        "credbox: warning: OS keyring unavailable; using the file backend "
+        "(credentials.json, mode 0600) instead",
+        file=sys.stderr,
+    )

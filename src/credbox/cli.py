@@ -1,12 +1,13 @@
-"""The ``xdg-kit`` command: manage any app's stored secrets and inspect its directories,
-from one place with one format.
+"""The ``credbox`` command: manage any app's stored secrets and inspect its directories.
 
-Instead of remembering each package's own way to store a key, ``xdg-kit set <app> <name>``
-writes the same ``credentials.json`` (mode 0600) that every consumer reads. The value is
-prompted for without echo when omitted, so it never lands in shell history. ``get`` masks
-by default, ``list`` shows names only, and ``doctor`` reports files that are readable
-beyond their owner. Everything here operates on xdg-kit's own stores and directories -- it
-is not a general-purpose CLI.
+``credbox set <app> <name>`` writes the same ``credentials.json`` (mode 0600) every consumer
+reads; the value is prompted for without echo when omitted, so it never lands in shell history.
+``get`` masks by default (``--reveal`` prints it in full), ``list`` shows names only, and
+``doctor`` reports files readable beyond their owner.
+
+Leak-surface discipline (the only raw secret ever written to stdout is a ``get --reveal``):
+everything else -- stderr, the ``set`` prompt, a masked ``get``, every error -- is content-free,
+and the CLI never prints a traceback.
 """
 
 from __future__ import annotations
@@ -18,40 +19,47 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from xdg_kit import __version__
-from xdg_kit.backends import FileBackend, default_backend
-from xdg_kit.credentials import Credentials
-from xdg_kit.errors import InvalidAppNameError, XdgKitError
-from xdg_kit.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
-from xdg_kit.permissions import warn_if_group_or_world_readable
-from xdg_kit.runtime import runtime_dir
+from credbox import __version__
+from credbox.backends import FileBackend, default_backend
+from credbox.credentials import Credentials
+from credbox.errors import CredBoxError, InvalidAppNameError, MissingExtraError
+from credbox.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
+from credbox.permissions import warn_if_group_or_world_readable
+from credbox.runtime import runtime_dir
+from credbox.secret import mask_secret
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point for the ``xdg-kit`` console script. Returns a process exit code:
-    0 on success, 1 on an ``XdgKitError`` (reported as a one-line message, not a
-    traceback), 2 on a usage error (from argparse). ``--version`` (and ``-h``) do not
-    return -- argparse prints and raises ``SystemExit(0)`` from ``parse_args``."""
+    """Entry point for the ``credbox`` console script. Returns a process exit code: 0 on success,
+    1 on a ``CredBoxError`` (reported as a one-line, content-free message -- never a traceback),
+    2 on a usage error. ``MissingExtraError`` prints an actionable ``pip install`` hint."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
         exit_code: int = args.run(args)
         return exit_code
     except InvalidAppNameError as err:
-        # an invalid app name is a usage mistake, not a runtime failure
-        print(f"xdg-kit: error: {err}", file=sys.stderr)
+        print(f"credbox: error: {err}", file=sys.stderr)   # a bad app name is a usage mistake
         return 2
-    except XdgKitError as err:
-        print(f"xdg-kit: error: {err}", file=sys.stderr)
+    except MissingExtraError as err:
+        print(
+            f"credbox: error: {err.extra} support is not installed; "
+            f"run 'pip install {err.dist}'",
+            file=sys.stderr,
+        )
+        return 1
+    except CredBoxError as err:
+        # Our errors are built content-free (path/name/kind only), so this never prints a secret.
+        print(f"credbox: error: {err}", file=sys.stderr)
         return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="xdg-kit", description=__doc__)
+    parser = argparse.ArgumentParser(prog="credbox", description=__doc__)
     parser.add_argument(
         "--version",
         action="version",
-        version=f"xdg-kit {__version__}",
+        version=f"credbox {__version__}",
         help="print the installed version and exit",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -61,8 +69,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_set.add_argument("name")
     p_set.add_argument(
         "--value",
-        help="the secret value; omit to be prompted without echo. Passing it here exposes "
-        "the secret in the process argument list (/proc, shell history) -- prefer the prompt",
+        help="the secret value; omit to be prompted without echo. Passing it here exposes the "
+        "secret in the process argument list (/proc, shell history) -- prefer the prompt",
     )
     _add_keyring_flag(p_set)
     p_set.set_defaults(run=_cmd_set)
@@ -122,17 +130,17 @@ def _cmd_set(args: argparse.Namespace) -> int:
         value = args.value
     else:
         try:
-            value = getpass.getpass(f"{args.name}: ")
+            value = getpass.getpass(f"{args.name}: ")   # no echo -- never in shell history
         except EOFError:
-            # No interactive stdin (e.g. a script that omitted --value): report it as a
-            # usage error rather than letting the EOFError escape as a bare traceback.
-            print("xdg-kit: error: no value provided and stdin is not interactive; "
-                  "pass --value", file=sys.stderr)
+            print(
+                "credbox: error: no value provided and stdin is not interactive; pass --value",
+                file=sys.stderr,
+            )
             return 2
     if not value.strip():
-        # A whitespace-only value reads back as absent (every read runs through
-        # _normalize_secret_value), so reject it here rather than store a false "stored".
-        print("xdg-kit: error: empty value; nothing stored", file=sys.stderr)
+        # A whitespace-only value reads back as absent, so reject it rather than store a false
+        # "stored" (and rather than let Credentials.set raise a ValueError as a traceback).
+        print("credbox: error: empty value; nothing stored", file=sys.stderr)
         return 1
     _credentials(args).set(args.name, value=value)
     print(f"stored {args.name} for {args.app}")
@@ -141,13 +149,14 @@ def _cmd_set(args: argparse.Namespace) -> int:
 
 def _cmd_get(args: argparse.Namespace) -> int:
     if args.resolve:
-        value = _credentials(args).secret(args.name)   # override(none) > env > this store
+        value = _credentials(args).secret(args.name)                       # override > env > store
     else:
-        value = default_backend(use_keyring=args.keyring).get(args.app, args.name)  # this store only
+        value = default_backend(use_keyring=args.keyring).get(args.app, args.name)   # store only
     if value is None:
-        print(f"xdg-kit: {args.name} is not set for {args.app}", file=sys.stderr)
+        print(f"credbox: {args.name} is not set for {args.app}", file=sys.stderr)
         return 1
-    print(value if args.reveal else _mask(value))
+    # The ONLY raw-secret-to-stdout path is --reveal; otherwise print the mask.
+    print(value.reveal() if args.reveal else mask_secret(value.reveal()))
     return 0
 
 
@@ -192,10 +201,9 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 def _discover_apps() -> list[str]:
     """App names that have a credentials file under the config base -- the immediate
-    subdirectories of ``config_dir``'s parent that contain a ``credentials.json``. A
-    subdirectory whose name is not a valid app segment is skipped, so one stray neighbour
-    cannot abort the whole sweep."""
-    config_base = config_dir("xdg-kit").parent   # the XDG config home itself
+    subdirectories of the config home that contain a ``credentials.json``. A subdirectory whose
+    name is not a valid app segment is skipped, so one stray neighbour cannot abort the sweep."""
+    config_base = config_dir("credbox").parent   # the XDG config home itself
     if not config_base.is_dir():
         return []
     discovered_apps = []
@@ -211,9 +219,8 @@ def _discover_apps() -> list[str]:
 
 
 def _warn_if_dir_group_or_world_accessible(directory: Path, *, app: str) -> None:
-    """Warn on stderr when the config directory holding a credentials file is reachable by
-    group or others -- it should be mode 0700 so another local user cannot replace the
-    file. POSIX-only, best-effort."""
+    """Warn on stderr when the config directory holding a credentials file is reachable by group
+    or others -- it should be mode 0700. POSIX-only, best-effort."""
     if os.name != "posix" or not directory.is_dir():
         return
     try:
@@ -226,14 +233,6 @@ def _warn_if_dir_group_or_world_accessible(directory: Path, *, app: str) -> None
             f"restrict it with 'chmod 700'",
             file=sys.stderr,
         )
-
-
-def _mask(value: str) -> str:
-    """A value shown with only its ends visible, e.g. ``sk***ab`` -- enough to tell which
-    key it is without printing it."""
-    if len(value) <= 8:
-        return "***"
-    return f"{value[:2]}***{value[-2:]}"
 
 
 if __name__ == "__main__":

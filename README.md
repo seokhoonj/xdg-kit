@@ -1,41 +1,46 @@
-# xdg-kit
+# credbox
 
-[![check](https://github.com/seokhoonj/xdg-kit/actions/workflows/check.yml/badge.svg)](https://github.com/seokhoonj/xdg-kit/actions/workflows/check.yml)
-[![PyPI](https://img.shields.io/pypi/v/xdg-kit)](https://pypi.org/project/xdg-kit/)
-[![Python](https://img.shields.io/pypi/pyversions/xdg-kit)](https://pypi.org/project/xdg-kit/)
-[![License](https://img.shields.io/pypi/l/xdg-kit)](https://github.com/seokhoonj/xdg-kit/blob/main/LICENSE)
+[![check](https://github.com/seokhoonj/credbox/actions/workflows/check.yml/badge.svg)](https://github.com/seokhoonj/credbox/actions/workflows/check.yml)
+[![PyPI](https://img.shields.io/pypi/v/credbox)](https://pypi.org/project/credbox/)
+[![Python](https://img.shields.io/pypi/pyversions/credbox)](https://pypi.org/project/credbox/)
+[![License](https://img.shields.io/pypi/l/credbox)](https://github.com/seokhoonj/credbox/blob/main/LICENSE)
 
 **English** | [한국어](README.ko.md)
 
-Secure XDG-style application storage for Python: paths, credentials, permissions, and
-runtime files.
+A secure **secret store** for Python apps and CLIs — XDG paths by default, OS-native (macOS/Windows) on request — leak-safe by construction.
 
-One small, dependency-free foundation for the two things every command-line app has to do
-on disk — **find where its files live** and **resolve its secrets** — done once, the same
-way, on every OS.
+Every command-line app has to resolve its secrets and find where its files live. credbox does
+both, once, the same way on every OS — and treats *not leaking the secret* as the whole job:
 
-- **Directories** follow the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/)
-  (`config` / `data` / `state` / `cache` / `runtime`), using the `~/.config` layout on
-  every platform — the same convention git follows — so paths are identical across
-  machines and no platform library is needed.
-- **Secrets** resolve in a fixed order — an explicit value, then the environment, then a
-  shared store, then the app's own store — so a key common to several apps can live in
-  **one** place instead of being copied into each.
-- **Storage** is a plain `credentials.json` at mode 0600 in a 0700 directory by default
-  (reliable headless and across machines); the OS keyring is an opt-in backend with
-  automatic file fallback.
+- **Leak-safe.** A resolved secret comes back as a `Secret` that masks itself in a log or a
+  traceback; you call `.reveal()` to get the raw value only at the point of use. A malformed
+  store, a failing OS keyring, or a wrong encryption passphrase raises a **content-free** error —
+  the value never rides along on the exception, its `__cause__`/`__context__` chain, or a
+  traceback. The CLI and the git helper write a raw secret to stdout only on an explicit reveal.
+- **Honest by default.** Storage is a plain `credentials.json` at mode 0600 in a 0700 directory —
+  reliable headless and across machines. The OS keyring and an encrypted-file backend are
+  **opt-in** upgrades; a missing keyring is an explicit, warned fallback, never a silent downgrade.
+- **Zero-dep core.** The default file store pulls in nothing. `keyring` and `cryptography` are
+  installed only if you ask for them, and the core's import graph can never reach them.
+
+credbox is a safe re-packaging of the `keyring` ecosystem's ideas — atomic writes, correct
+permissions, cross-process locking, XDG paths, and leak-scrubbing wired together as one tested
+unit — not a novel vault. Directories follow the
+[XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/).
 
 ## 1. Install
 
 ```sh
-pip install xdg-kit            # file store, zero runtime dependencies
-pip install "xdg-kit[keyring]" # add the optional OS keyring backend
+pip install credbox              # file store, zero runtime dependencies
+pip install "credbox[keyring]"   # add the optional OS keyring backend
+pip install "credbox[crypto]"     # add the optional encrypted-file backend (Argon2id + AES-GCM)
+pip install "credbox[all]"       # both
 ```
 
 Check it worked:
 
 ```sh
-xdg-kit --version
+credbox --version
 ```
 
 Requires Python 3.11+.
@@ -45,23 +50,124 @@ Requires Python 3.11+.
 Store a secret once (prompted, without echo):
 
 ```sh
-xdg-kit set myapp API_KEY
+credbox set myapp API_KEY
 ```
 
-Then read it back in code — `require` resolves it ($API_KEY, else myapp's store) and raises
-if it is set nowhere:
+Then read it back in code. `require` resolves it (`$API_KEY`, else `myapp`'s store) and raises if
+it is set nowhere; the result is a `Secret`, so it will not land in a log by accident:
 
 ```python
-from xdg_kit import config_dir, Credentials
+from credbox import Credentials
 
-config_dir("myapp")                       # ~/.config/myapp (where files live)
-Credentials("myapp").require("API_KEY")   # read the secret; raises if unset
+secret = Credentials("myapp").require("API_KEY")   # a Secret, not a str
+secret.reveal()                                     # the raw value, at the point of use
+print(secret)                                       # 'API_...cdef' — masked, safe to log
 ```
 
-## 3. Directories
+## 3. Secrets
+
+Secrets (passwords, tokens, API keys) live in **one `credentials.json` per app** —
+`config_dir(app)/credentials.json`, e.g. `~/.config/myapp/credentials.json` for `myapp`. That one
+file is the app's **store**. Which store is read is decided by the app name, so one app can name
+another app's store and read it alongside its own (see **shared store** below).
 
 ```python
-from xdg_kit import config_dir, data_dir, state_dir, cache_dir, runtime_dir
+from credbox import Credentials, Secret
+
+# Resolution order: override > environment > shared stores > this app's store
+creds = Credentials("myapp", shared=["auth"])
+key   = creds.require("API_KEY")          # env $API_KEY, then auth's store, then myapp's; raises if unset
+maybe = creds.secret("API_KEY")           # same, but returns None instead of raising
+creds.set("API_KEY", value="sk-...")      # writes myapp's own store (str or Secret; keyword-only)
+creds.unset("API_KEY")                    # removes it from myapp's store (no-op if absent)
+creds.names()                             # ["API_KEY", ...] — names only, never values
+
+key.reveal()          # -> "sk-..."  the raw string, for passing to an HTTP client
+```
+
+`secret` and `require` return a `Secret`; call `.reveal()` for the raw string. A `Secret` renders
+masked in `str`/`repr`, compares in constant time, and is unhashable, so it cannot slip into a log
+line or become a dict key by accident. `set` accepts a `str` or a `Secret`, refuses a blank value,
+and strips surrounding whitespace so a stored key matches what resolution returns.
+
+The **shared store** is how a key common to several apps stops being duplicated: store it once
+under a shared app (say `"auth"`), and every consumer resolves it with `shared=["auth"]`. A key
+specific to one app stays in that app's own store.
+
+## 4. The `credbox` command
+
+Manage any app's secrets from one place, in one format:
+
+```sh
+credbox set myapp API_KEY               # prompts without echo; writes credentials.json (0600)
+credbox set myapp API_KEY --value sk-…  # or pass it directly (exposes it in argv; prefer the prompt)
+credbox list myapp                      # names only, never values
+credbox get myapp API_KEY               # masked (API_…cdef); reads the stored value only
+credbox get myapp API_KEY --reveal      # print in full (the only raw-secret-to-stdout path)
+credbox get myapp API_KEY --resolve     # also consult the environment variable, not just the store
+credbox unset myapp API_KEY
+credbox path myapp                      # print the credentials.json path
+credbox dirs myapp                      # print all five directories
+credbox doctor                          # check every app's credentials file/dir permissions
+```
+
+`set`, `get`, `list`, and `unset` accept `--keyring` to operate on the OS keyring backend (with
+automatic file fallback). The CLI never prints a traceback: a runtime error becomes a one-line,
+content-free message on stderr. Exit codes: `0` success, `1` a command failure, `2` a usage error.
+
+## 5. Backends
+
+Where a secret is physically stored is a `SecretBackend`. `Credentials` uses a `FileBackend` by
+default; select another by passing `backend=`:
+
+```python
+from credbox import Credentials, Secret
+from credbox import default_backend, file_backend, keyring_backend, encrypted_backend
+
+Credentials("myapp")                                                    # file store (default)
+Credentials("myapp", backend=default_backend(use_keyring=True))         # keyring over file
+Credentials("myapp", backend=keyring_backend(fallback=file_backend()))  # the same, explicit
+Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encrypted file [crypto]
+```
+
+- **File store** (default, zero-dep) — a `credentials.json` in the app's folder. Works reliably
+  everywhere; stores the value in plaintext at mode 0600.
+- **OS keyring** (`[keyring]`) — the OS-provided vault (macOS Keychain, GNOME Keyring, …). When
+  reachable it is authoritative, and a successful `set`/`unset` also clears any stale plaintext
+  copy from the fallback file. When *absent* (no backend on a server, cron, a container), every
+  operation falls back to the file store with a one-time, content-free warning — so a user who
+  turned the keyring on learns the value went to the file, never a silent downgrade. A *present but
+  failing* keyring (locked, a transient error) **fails closed**: every operation raises rather than
+  silently write plaintext or serve a stale value — the file fallback is reached only when no
+  keyring backend exists *at all*. (One caveat: reconciliation runs only keyring → file; a value
+  written to the file while the keyring was structurally absent is not migrated back, so re-set the
+  key while the keyring is reachable.)
+- **Encrypted file** (`[crypto]`) — a single AES-GCM blob keyed by an Argon2id hash of a passphrase.
+  It is **terminal**: a wrong passphrase or a tampered file fails closed with a content-free
+  `DecryptionError`, never a plaintext downgrade. The whole header is authenticated (AES-GCM AAD),
+  a fresh nonce is drawn per write, and the deliberately expensive KDF adds ~100 ms-scale latency
+  per store open — a feature, not a bug.
+
+The factories gate the optional import: `keyring_backend()` / `encrypted_backend()` raise a
+`MissingExtraError` (with a `pip install credbox[…]` hint) when the extra is not installed.
+
+## 6. Git credential helper
+
+credbox can serve credentials to git. Point git at the installed helper:
+
+```sh
+git config --global credential.helper credbox
+```
+
+git then calls `git-credential-credbox` for `get`/`store`/`erase`, mapping the git `host` to a
+credbox app and the git `username` to the secret name. On `get` the helper writes only the
+credential reply to stdout; on any error it writes nothing (git prompts) and a content-free note to
+stderr — never the secret, never a traceback.
+
+## 7. Directories
+
+```python
+from credbox import config_dir, data_dir, state_dir, cache_dir, runtime_dir
 
 config_dir("myapp")   # ~/.config/myapp        (or $XDG_CONFIG_HOME/...)
 data_dir("myapp")     # ~/.local/share/myapp   (or $XDG_DATA_HOME/...)
@@ -70,202 +176,74 @@ cache_dir("myapp")    # ~/.cache/myapp         (or $XDG_CACHE_HOME/...)
 runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, else a secured 0700 temp dir
 ```
 
-The app name is validated as a single path segment, so a crafted name can never escape its
-base. `data_dir` and `state_dir` also honour a per-app `<APP>_DATA_DIR` / `<APP>_STATE_DIR`
-environment override (an absolute path used as-is), so a large archive can be relocated to
-another volume without editing anything. `runtime_dir` is the one XDG directory with no
-specified default; when `XDG_RUNTIME_DIR` is unset (cron, containers, macOS, Windows) it
-creates and secures a private directory under the system temp dir (uid-keyed on POSIX,
-where a shared `/tmp` must not be hijacked), as the spec directs, and returns it (pass
-`create=False` to compute the path without creating it).
+The app name is validated as a single path segment, so a crafted name can never escape its base.
+`data_dir` and `state_dir` honour a per-app `<PREFIX>_DATA_DIR` / `<PREFIX>_STATE_DIR` override (an
+absolute path used as-is), where `<PREFIX>` is `env_var_prefix(app)`. By default paths use the XDG
+`~/.config` layout on every OS; pass `layout="native"` for OS-native locations (macOS
+`~/Library/Application Support`, Windows `%LOCALAPPDATA%`), or set `CREDBOX_LAYOUT`.
 
-## 4. Secrets
+**Windows note:** the 0600/0700 mode bits are POSIX-only. On Windows there is no such mode; credbox
+relies on the per-user `%LOCALAPPDATA%` ACL, and does not claim a mode guarantee it cannot deliver
+there.
 
-Secrets (passwords, tokens, API keys) live in **one `credentials.json` per app** —
-`config_dir(app)/credentials.json`, e.g. `~/.config/myapp/credentials.json` for `myapp`.
-That one file is the app's **store**. Which store is read is decided by the app name, so one
-app can name another app's store and read it alongside its own (see **shared store** below).
-
-```python
-from xdg_kit import Credentials, get_secret, require_secret, set_secret, unset_secret, secret_names
-
-# Resolution order: override > environment > shared stores > this app's store
-creds = Credentials("myapp", shared=["auth"])
-key = creds.require("API_KEY")         # env $API_KEY, then auth's store, then myapp's; raises if unset
-maybe = creds.secret("API_KEY")        # same, but returns None instead of raising
-creds.set("API_KEY", value="sk-...")   # writes myapp's own store (value is keyword-only)
-creds.unset("API_KEY")                 # removes it from myapp's store (no-op if absent)
-creds.names()                          # ["API_KEY", ...] -- names only, never values
-
-# One-shot module-level convenience (each constructs a Credentials internally):
-get_secret("myapp", "API_KEY")                   # -> str | None
-require_secret("myapp", "API_KEY")               # -> str, raises CredentialsError if unset
-set_secret("myapp", "API_KEY", value="sk-...")   # value is keyword-only
-unset_secret("myapp", "API_KEY")                 # remove from this app's store (no-op if absent)
-secret_names("myapp")                            # -> list[str]
-```
-
-Storing a secret refuses a blank (empty or whitespace-only) value and strips surrounding
-whitespace, so a stored key matches what resolution returns and a pasted key's trailing
-newline never lands on disk.
-
-The **shared store** is how a key common to several apps stops being duplicated: store it
-once under a shared app (say `"auth"`), and every consumer resolves it with
-`shared=["auth"]`. A key specific to one app stays in that app's own store.
-
-## 5. The `xdg-kit` command
-
-Manage any app's secrets from one place, in one format — no need to learn each package's
-own way to store a key:
-
-```sh
-xdg-kit set myapp API_KEY               # prompts without echo; writes credentials.json (0600)
-xdg-kit set myapp API_KEY --value sk-…  # or pass it directly (exposes it in argv; prefer the prompt)
-xdg-kit list myapp                      # names only, never values
-xdg-kit get myapp API_KEY               # masked (sk***ef); reads the stored value only
-xdg-kit get myapp API_KEY --reveal      # print in full
-xdg-kit get myapp API_KEY --resolve     # also consult the environment variable, not just the stored value
-xdg-kit unset myapp API_KEY
-xdg-kit path myapp                      # print the credentials.json path
-xdg-kit dirs myapp                      # print all five directories
-xdg-kit doctor                          # check every app's credentials file/dir permissions
-xdg-kit doctor myapp other-app          # check only the named apps
-```
-
-`set`, `get`, `list`, and `unset` accept `--keyring` to operate on the OS keyring backend
-(with automatic file fallback). Exit codes: `0` success, `1` a command failure (a missing
-or empty secret, or a runtime error), `2` a usage error (an invalid app name, or no value
-given to `set` with no interactive prompt available).
-
-## 6. Keyring
-
-Secrets — passwords, tokens, API keys — can live in one of two places:
-
-- **File store** (the default) — a `credentials.json` in the app's folder. Works reliably
-  everywhere, but stores the value in plaintext.
-- **OS keyring** (opt-in) — the OS-provided encrypted vault (macOS Keychain, GNOME Keyring,
-  etc.). More secure, but unavailable where no keyring exists or it is locked: headless
-  servers, cron jobs, containers.
-
-The file store is the default because it works everywhere. To use the keyring, turn it on
-explicitly:
-
-```python
-from xdg_kit.backends import FileBackend, KeyringBackend, default_backend
-from xdg_kit import Credentials
-
-backend = KeyringBackend(fallback=FileBackend())   # keyring when available, else the file
-creds = Credentials("myapp", backend=backend)
-# or: default_backend(use_keyring=True) -- the same thing
-```
-
-With the keyring turned on, xdg-kit behaves like this:
-
-- **Normally (keyring reachable)**: the value is stored in the keyring, and the keyring holds
-  authority over it — if the file also has the same key, the keyring value wins. A successful
-  `set` / `unset` also clears any stale plaintext copy from the file, so switching to the
-  keyring never leaves a file copy behind.
-- **When the keyring can't be used**: an *absent* keyring (not installed, or no backend on a
-  server) makes every operation fall back to the file store, with a one-time warning so a user
-  who turned the keyring on learns the value went to the file. A *present but failing* keyring
-  (e.g. locked) still lets `get` and `set` fall back, but `unset` fails loudly (raises) rather
-  than risk reporting a secret deleted while it may still be in the keyring.
-
-**One caveat** — this reconciliation runs only one way, keyring → file; the
-reverse (file → keyring) is not automatic: a value written to the file while the keyring
-was unavailable is *not* migrated back into the keyring once it
-recovers. So if the keyring still holds an older value for that key, a read hits the keyring
-first and that older value shadows the newer one in the file. The reliable fix is to
-**re-set the key while the keyring is reachable** — the new value then goes straight into the
-keyring and the stale file copy is cleared. Do *not* try to fix it by deleting the keyring
-entry with `xdg-kit unset --keyring`: while the keyring is reachable that also deletes the
-newer file copy, losing the value.
-
-## 7. Redacting secrets from logs
+## 8. Redacting secrets from logs
 
 An API often echoes your key back inside an error message or a request URL, so logging an
-unscrubbed exception can leak the very secret it failed with into a log file or your terminal.
-These helpers replace known secret values with `***` before anything is logged or surfaced.
+unscrubbed exception can leak the very secret it failed with. These helpers replace known secret
+values — and their URL-encoded forms — with `***` before anything is logged:
 
 ```python
-from xdg_kit.scrub import scrub_secrets, scrub_exception
+from credbox import scrub_secrets, scrub_exception
 
 scrub_secrets("failed with sk-abc123", [key])   # "failed with ***"
 raise scrub_exception(err, [key])               # scrubs the whole __cause__/__context__ chain
 ```
 
-`scrub_exception` never raises and rewrites each exception's `args` and a string `url`
-attribute; for an exception with a custom `__str__`, also pass the rendered log line
-through `scrub_secrets`.
+`scrub_exception` never raises and rewrites each exception's `args`, its transport URLs (`url`,
+`request.url`, `response.url`), and its PEP 678 `__notes__`. For an exception with a custom
+`__str__`, also pass the rendered log line through `scrub_secrets`.
 
-## 8. Single-instance locking
+## 9. Single-instance locking
 
-Stop a job from overlapping with another copy of itself — two cron runs, or a cron run and a
-manual one. Such runs redo the same work, produce duplicate output (double sends,
-duplicate rows), and race on shared state (two writers corrupting one file); a `FileLock`
-lets the later run detect that one is already in progress and skip rather than pile on.
+Stop a job from overlapping with another copy of itself — two cron runs, or a cron run and a manual
+one — which redo work, produce duplicates, and race on shared state:
 
 ```python
-from xdg_kit.locking import FileLock, single_instance
+from credbox import single_instance, FileLock
 
 with single_instance("myapp", "poll") as acquired:
     if not acquired:
         return   # another run holds the lock; skip rather than pile on
     ...
-
-lock = FileLock("myapp", "poll")   # or hold it explicitly
-if lock.acquire():
-    try:
-        ...
-    finally:
-        lock.release()
 ```
 
-The lock lives in `runtime_dir` and is released by the OS when the process exits, even on a
-crash.
+The lock lives in `runtime_dir` and is released by the OS when the process exits, even on a crash.
 
-## 9. Public API reference
+## 10. Public API reference
 
-### Everyday API
+### Everyday API (`credbox`)
 
 | Import | What it is |
 |--------|------------|
-| `config_dir` / `data_dir` / `state_dir` / `cache_dir` (`xdg_kit`) | XDG directory for an app (a `Path`). |
-| `runtime_dir(app, *, create=True)` (`xdg_kit`) | Secured session runtime directory. |
-| `Credentials(app, *, shared=(), backend=None)` (`xdg_kit`) | The four-tier secret resolver: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
-| `get_secret` / `require_secret` / `set_secret` / `unset_secret` / `secret_names` (`xdg_kit`) | Module-level one-shot convenience over `Credentials`. |
-| `FileBackend` / `KeyringBackend` / `default_backend` (`xdg_kit.backends`) | Storage backends: the file store (default) and the OS keyring, plus the chooser. |
-| `scrub_secrets` / `scrub_exception` (`xdg_kit.scrub`) | Redact secret values from text and exception chains. |
-| `FileLock` / `single_instance` (`xdg_kit.locking`) | Single-instance advisory locking in `runtime_dir`. |
-| `XdgKitError` / `CredentialsError` / `InsecureStorageError` / `InvalidAppNameError` (`xdg_kit`) | The exception hierarchy. |
-| `__version__` (`xdg_kit`) | The installed package version string. |
+| `Credentials(app, *, shared=(), backend=None)` | The four-tier secret resolver: `.secret` / `.require` / `.set` / `.unset` / `.names`. |
+| `Secret` / `mask_secret` | The leak-safe value type (`.reveal()` for the raw string) and its canonical mask. |
+| `config_dir` / `data_dir` / `state_dir` / `cache_dir` / `runtime_dir` | XDG directories for an app. |
+| `default_backend` / `file_backend` / `keyring_backend` / `encrypted_backend` | Backend chooser and factories. |
+| `SecretBackend` / `FileBackend` | The backend protocol and the zero-dep file backend. |
+| `scrub_secrets` / `scrub_exception` | Redact secret values from text and exception chains. |
+| `single_instance` / `FileLock` | Single-instance advisory locking in `runtime_dir`. |
+| `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `DecryptionError` / `MissingExtraError` | The exception hierarchy. |
+| `__version__` | The installed package version string. |
 
 ### Building blocks (for library authors — rarely called directly)
 
 | Import | What it is |
 |--------|------------|
-| `SecretBackend` (`xdg_kit.backends`) | The backend interface (a `Protocol`) — implement it to write your own store. |
-| `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` (`xdg_kit.permissions`) | Directory/file permission guarantees and checks. |
-| `PRIVATE_FILE_MODE` / `PRIVATE_DIR_MODE` (`xdg_kit.permissions`) | The `0600` / `0700` mode constants for private files and directories. |
-| `write_bytes_atomic` / `write_text_atomic` (`xdg_kit.atomic`) | Atomic 0600 writes. |
-| `env_value` / `absolute_override` (`xdg_kit.environment`) | Read an env value (blank = absent) / an absolute-path override. |
-| `app_dir_segment` (`xdg_kit.paths`) | Validate an app name as a safe path segment. |
-
-## 10. For library authors
-
-`xdg-kit` provides only the base layer — directories, secret resolution, permissions,
-atomic writes, locking, and scrubbing. Your package keeps its own domain configuration
-(accounts, routes, topics) and reaches for xdg-kit underneath:
-
-```python
-from xdg_kit import config_dir, Credentials
-
-def credentials_path():
-    return config_dir("yourapp") / "credentials.json"
-
-def api_key() -> str:
-    return Credentials("yourapp").require("YOURAPP_API_KEY")
-```
+| `ensure_dir` / `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` | Directory/file permission guarantees and checks. |
+| `write_bytes_atomic` / `write_text_atomic` | Atomic 0600 writes. |
+| `read_json` / `relocate_once` | Corruption-aware non-secret state read; idempotent, fail-closed relocation. |
+| `env_var_prefix` / `colliding_env_var_prefixes` / `read_absolute_path_override` | App-name env folding and an absolute-path override. |
+| `app_dir_segment` / `Layout` / `default_layout` / `set_default_layout` | Validate an app name; select the path layout. |
 
 ## 11. License
 

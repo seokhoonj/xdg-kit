@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xdg_kit.scrub import REDACTION, scrub_exception, scrub_secrets
+from credbox.scrub import REDACTION, scrub_exception, scrub_secrets
 
 
 def test_scrub_replaces_each_secret():

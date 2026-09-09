@@ -7,8 +7,8 @@ import tempfile
 
 import pytest
 
-from xdg_kit.errors import InsecureStorageError
-from xdg_kit.runtime import runtime_dir
+from credbox.errors import InsecureStorageError
+from credbox.runtime import runtime_dir
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
@@ -42,7 +42,7 @@ def test_falls_back_to_temp_when_runtime_unset(monkeypatch, tmp_path):
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
     path = runtime_dir("nw")
     assert path.is_dir()
-    assert path == fake_tmp / f"xdg-kit-{os.getuid()}" / "nw"
+    assert path == fake_tmp / f"credbox-{os.getuid()}" / "nw"
     assert (path.stat().st_mode & 0o777) == 0o700
     assert (path.parent.stat().st_mode & 0o777) == 0o700   # per-uid root is private too
 

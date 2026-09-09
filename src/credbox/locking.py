@@ -1,14 +1,14 @@
 """A best-effort single-instance lock, so two runs of the same job do not overlap.
 
-Overlapping runs -- a cron job and a manual one, or two crons -- can double-spend a paid
-API, deliver duplicates, and race on shared state. A ``FileLock`` holds an exclusive
-advisory lock on a file in ``runtime_dir(app)`` (where the XDG spec says locks belong) for
-as long as it is held, and reports whether it was acquired, so a caller can skip a run
-already in progress rather than pile on.
+Overlapping runs -- a cron job and a manual one, or two crons -- can double-spend a paid API,
+deliver duplicates, and race on shared state. A ``FileLock`` holds an exclusive advisory lock
+on a file in ``runtime_dir(app)`` (where the XDG spec says locks belong) for as long as it is
+held, and reports whether it was acquired, so a caller can skip a run already in progress
+rather than pile on.
 
 Built on ``fcntl.flock`` (POSIX) and ``msvcrt.locking`` (Windows) via ``_oslock`` -- both
-released by the OS automatically when the process exits, even on a crash, so there is no
-stale lock to clean up. On a platform with neither, it is a no-op that always acquires.
+released by the OS automatically when the process exits, even on a crash, so there is no stale
+lock to clean up. On a platform with neither, it is a no-op that always acquires.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import IO
 
-from xdg_kit._oslock import lock_exclusive, unlock
-from xdg_kit.errors import XdgKitError
-from xdg_kit.paths import app_dir_segment
-from xdg_kit.runtime import runtime_dir
+from credbox._oslock import lock_exclusive, unlock
+from credbox.errors import CredBoxError
+from credbox.paths import app_dir_segment
+from credbox.runtime import runtime_dir
 
 __all__ = [
     "FileLock",
@@ -29,9 +29,9 @@ __all__ = [
 
 
 class FileLock:
-    """An exclusive, non-blocking advisory lock named ``name`` for ``app``, held on a file
-    in ``runtime_dir(app)``. Acquire it, check ``acquired``, and release it -- or use it as
-    a context manager. Re-acquiring or releasing when not held is safe."""
+    """An exclusive, non-blocking advisory lock named ``name`` for ``app``, held on a file in
+    ``runtime_dir(app)``. Acquire it, check ``acquired``, and release it -- or use it as a
+    context manager. Re-acquiring or releasing when not held is safe."""
 
     acquired: bool   # whether this lock is currently held (public: callers read it)
 
@@ -56,10 +56,10 @@ class FileLock:
         another process already holds it. Idempotent while held.
 
         Raises:
-            XdgKitError: the lock file could not be opened, or (propagated from
+            CredBoxError: the lock file could not be opened, or (propagated from
                 ``runtime_dir``) the runtime directory could not be created.
-            InsecureStorageError: the runtime directory exists but is unsafe (propagated
-                from ``runtime_dir``).
+            InsecureStorageError: the runtime directory exists but is unsafe (propagated from
+                ``runtime_dir``).
         """
         if self.acquired:
             return True
@@ -67,7 +67,7 @@ class FileLock:
         try:
             handle = path.open("a+")   # a+ suits both flock and msvcrt; never truncates a holder's file
         except OSError as err:
-            raise XdgKitError(f"could not open lock file {path}: {err}") from err
+            raise CredBoxError(f"could not open lock file {path}: {err}") from err
         if not lock_exclusive(handle, blocking=False):
             handle.close()
             return False   # another process holds it
@@ -97,12 +97,12 @@ class FileLock:
 @contextmanager
 def single_instance(app: str, name: str) -> Iterator[bool]:
     """Hold a ``FileLock`` for the block and yield whether it was acquired -- ``True`` to
-    proceed, ``False`` when another process already holds it (the caller should skip its
-    run). Convenience over ``FileLock``.
+    proceed, ``False`` when another process already holds it (the caller should skip its run).
+    Convenience over ``FileLock``.
 
     Raises:
         InvalidAppNameError: ``app`` or ``name`` is not a valid directory segment.
-        XdgKitError / InsecureStorageError: propagated from ``runtime_dir``.
+        CredBoxError / InsecureStorageError: propagated from ``runtime_dir``.
     """
     lock = FileLock(app, name)
     acquired = lock.acquire()

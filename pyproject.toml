@@ -6,14 +6,14 @@ requires      = ["hatchling>=1.27,<1.32"]
 build-backend = "hatchling.build"
 
 [project]
-name            = "xdg-kit"
-version         = "0.2.0"
-description     = "Secure XDG-style application storage for Python: paths, credentials, permissions, and runtime files."
+name            = "credbox"
+version         = "0.1.0"
+description     = "A leak-safe secret store for Python apps and CLIs: XDG paths by default or OS-native locations, a masking Secret type, atomic-0600 writes, and opt-in keyring/encrypted backends."
 readme          = "README.md"
 license         = "MIT"
 license-files   = ["LICENSE"]
 authors         = [{ name = "Seokhoon Joo", email = "seokhoonj@gmail.com" }]
-keywords        = ["xdg", "config", "credentials", "keyring", "paths", "runtime", "appdirs"]
+keywords        = ["credentials", "secrets", "keyring", "xdg", "config", "paths", "security"]
 classifiers     = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -32,24 +32,35 @@ requires-python = ">=3.11"
 dependencies    = []
 
 [project.urls]
-Homepage   = "https://github.com/seokhoonj/xdg-kit"
-Repository = "https://github.com/seokhoonj/xdg-kit"
-Issues     = "https://github.com/seokhoonj/xdg-kit/issues"
+Homepage   = "https://github.com/seokhoonj/credbox"
+Repository = "https://github.com/seokhoonj/credbox"
+Issues     = "https://github.com/seokhoonj/credbox/issues"
 
 [project.optional-dependencies]
 keyring = ["keyring>=24"]
+crypto  = ["cryptography>=44"]
+all     = ["keyring>=24", "cryptography>=44"]
+
+[project.scripts]
+credbox                = "credbox.cli:main"
+git-credential-credbox = "credbox.gitcredential:main"
+
+# Development tooling is a PEP 735 dependency group, not a published extra: it stays out of the
+# distribution metadata (no `Provides-Extra: dev`), so the user-facing extras are only keyring /
+# crypto / all. Install it for local work or CI with `uv pip install -e . --group dev` (or
+# `pip install -e . --group dev`). The keyring + cryptography here let the full suite exercise both
+# optional backends.
+[dependency-groups]
 dev = [
     "keyring>=24",
+    "cryptography>=44",
     "mypy>=1.11",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
 
-[project.scripts]
-xdg-kit = "xdg_kit.cli:main"
-
 [tool.hatch.build.targets.wheel]
-packages = ["src/xdg_kit"]
+packages = ["src/credbox"]
 
 [tool.ruff]
 line-length    = 100
@@ -77,9 +88,16 @@ check_untyped_defs = true
 module = ["keyring", "keyring.errors"]
 ignore_missing_imports = true
 
+# cryptography ships type information, but its Argon2id KDF lives in a hazmat submodule that
+# some stub versions do not fully cover; the encrypted backend guards its import behind the
+# find-spec factory, so type-checking without it installed must not error here.
+[[tool.mypy.overrides]]
+module = ["cryptography.*"]
+ignore_missing_imports = true
+
 # This module carries a POSIX branch and a Windows branch, and typeshed only reveals
 # the host's own (fcntl vs msvcrt). Both branches need an ignore and one is always
 # unused, so type-checking on either OS means not warning here.
 [[tool.mypy.overrides]]
-module = ["xdg_kit._oslock"]
+module = ["credbox._oslock"]
 warn_unused_ignores = false

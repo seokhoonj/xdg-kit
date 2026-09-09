@@ -1,19 +1,17 @@
 name: reusable check
 
-# The full check -- tests, lint, types, and the packaging assertions -- factored
-# into one reusable job so both `check.yml` (on push / PR) and the release gate in
-# `publish.yml` run the *identical* thing. One definition is what makes "publish
-# gates on the full check" true; a second hand-maintained copy would drift, and a
-# check added here silently would not gate releases.
+# The full check -- tests, lint, types, and the packaging assertions -- factored into one
+# reusable job so both `check.yml` (on push / PR) and the release gate in `publish.yml` run the
+# *identical* thing. One definition is what makes "publish gates on the full check" true; a second
+# hand-maintained copy would drift, and a check added here silently would not gate releases.
 
 on:
   workflow_call:
 
-# The floor lives on the shared body, not only on `check.yml`: `publish.yml`'s gate
-# calls this same workflow, and if the floor were only on `check.yml` the gate would
-# run this check with the repo-default (possibly write) token. Declared here, the
-# check is read-only from every caller. A reusable workflow can only downscope from
-# the caller, so this never widens anyone's token.
+# The floor lives on the shared body, not only on `check.yml`: `publish.yml`'s gate calls this same
+# workflow, and if the floor were only on `check.yml` the gate would run this check with the
+# repo-default (possibly write) token. Declared here, the check is read-only from every caller. A
+# reusable workflow can only downscope from the caller, so this never widens anyone's token.
 permissions:
   contents: read
 
@@ -24,9 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor and the current release. requires-python says >=3.11, so 3.11 is
-        # the version that claim has to actually hold on; the upper end tracks whatever
-        # CPython currently ships, since >=3.11 promises every release above it.
+        # The floor and the current release. requires-python says >=3.11, so 3.11 is the version
+        # that claim has to actually hold on; the upper end tracks whatever CPython currently ships.
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
@@ -36,12 +33,14 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Install
-        # A venv per matrix version, not `uv pip --system`: the runner's system
-        # Python is externally managed and is one fixed version whatever the matrix
-        # says. This is also what the README tells a person to run.
+        # A venv per matrix version, not `uv pip --system`: the runner's system Python is
+        # externally managed and is one fixed version whatever the matrix says. The `dev`
+        # dependency group (PEP 735) pulls both optional backends plus the tooling, so the full
+        # suite exercises keyring and crypto; it is a group, not a published extra, so it never
+        # appears in the distribution's `Provides-Extra`.
         run: |
           uv venv --python ${{ matrix.python-version }}
-          uv pip install -e ".[dev]"
+          uv pip install -e . --group dev
           .venv/bin/python -c "import sys; print('testing on', sys.version)"
 
       - name: Test
@@ -54,45 +53,85 @@ jobs:
         run: .venv/bin/mypy
 
       - name: Confirm the default install has no runtime dependencies
-        # The zero-dependency default is in the README and the pyproject: keyring is an
-        # opt-in extra, so a plain `pip install xdg-kit` must pull in nothing. A claim
-        # nothing checks quietly stops being true, so install into a bare environment
-        # and assert the runtime (non-extra) requirement set is empty.
+        # The zero-dependency default is in the README and the pyproject: keyring and cryptography
+        # are opt-in extras, so a plain `pip install credbox` must pull in nothing. A claim nothing
+        # checks quietly stops being true, so install into a bare environment and assert the runtime
+        # (non-extra) requirement set is empty.
         run: |
           uv venv /tmp/bare --python ${{ matrix.python-version }}
           uv pip install --python /tmp/bare/bin/python .
           /tmp/bare/bin/python -c "
           import importlib.metadata as md
-          requires = md.requires('xdg-kit') or []
+          requires = md.requires('credbox') or []
           runtime = [r for r in requires if 'extra ==' not in r]
           assert not runtime, f'runtime dependencies appeared: {runtime}'
-          import xdg_kit
-          print('xdg-kit', xdg_kit.__version__, 'imports with no third-party packages')
+          import credbox
+          print('credbox', credbox.__version__, 'imports with no third-party packages')
           "
 
-      - name: Confirm the console script installed
-        # pyproject declares an `xdg-kit` entry point; a wheel that dropped it would
-        # leave the README and the docs pointing at a command that is not there. The
-        # top-level --version must print (not be shoved behind a required subcommand).
+      - name: Confirm the install variants behave (core-only / [keyring] / [crypto])
+        # Each install shape must yield a working backend for its extra. The zero-dep core also
+        # gates BOTH extras with MissingExtraError -- but that "gated when absent" check is made
+        # ONLY in the core-only variant: an extra's dependency can arrive transitively (on Linux
+        # `keyring` pulls SecretStorage, which depends on `cryptography`), so a [keyring] venv
+        # legitimately has cryptography and does NOT gate crypto -- and that is correct (the gate
+        # only turns an absent dependency into an actionable error). The gate logic itself is
+        # unit-tested in the suite; here we confirm the install shapes, not the transitive graph.
+        run: |
+          check_variant() {
+            local venv="$1" spec="$2" script="$3"
+            uv venv "$venv" --python ${{ matrix.python-version }}
+            uv pip install --python "$venv/bin/python" "$spec"
+            XDG_CONFIG_HOME=$(mktemp -d) "$venv/bin/python" -c "$script"
+          }
+          # core-only: a FileBackend round-trips; with no extras installed (the zero-dep core pulls
+          # nothing transitively), BOTH keyring and crypto are gated by MissingExtraError.
+          check_variant /tmp/v-core "." "
+          from credbox import file_backend, keyring_backend, encrypted_backend, Secret
+          from credbox.errors import MissingExtraError
+          b = file_backend(); b.set('app', 'k', value='v'); assert b.get('app', 'k').reveal() == 'v'
+          for make in (lambda: keyring_backend(), lambda: encrypted_backend(passphrase=Secret('p'))):
+              try: make()
+              except MissingExtraError: pass
+              else: raise SystemExit('an extra was not gated in the zero-dep core')
+          print('core-only variant OK')
+          "
+          # [keyring]: the keyring backend builds.
+          check_variant /tmp/v-keyring ".[keyring]" "
+          from credbox import keyring_backend, file_backend
+          assert type(keyring_backend(fallback=file_backend())).__name__ == 'KeyringBackend'
+          print('[keyring] variant OK')
+          "
+          # [crypto]: the encrypted backend round-trips.
+          check_variant /tmp/v-crypto ".[crypto]" "
+          from credbox import encrypted_backend, Secret
+          b = encrypted_backend(passphrase=Secret('pw')); b.set('app', 'k', value='v')
+          assert b.get('app', 'k').reveal() == 'v'
+          print('[crypto] variant OK')
+          "
+
+      - name: Confirm the console scripts installed
+        # pyproject declares the `credbox` and `git-credential-credbox` entry points; a wheel that
+        # dropped them would leave the README pointing at commands that are not there.
         run: |
           uv venv /tmp/cli --python ${{ matrix.python-version }}
           uv pip install --python /tmp/cli/bin/python .
-          /tmp/cli/bin/xdg-kit --version
+          /tmp/cli/bin/credbox --version
+          test -x /tmp/cli/bin/git-credential-credbox
 
       - name: Confirm a user's type checker can see the hints
-        # Every hint in this package is invisible to a user unless py.typed ships
-        # alongside it (PEP 561), and the source cannot answer whether it did:
-        # src/xdg_kit/py.typed can sit in git while the built wheel omits it. So ask
-        # it the way a user does -- install the built package into a clean
-        # environment and run their checker over their code.
+        # Every hint in this package is invisible to a user unless py.typed ships alongside it
+        # (PEP 561), and the source cannot answer whether it did: src/credbox/py.typed can sit in
+        # git while the built wheel omits it. So ask it the way a user does -- install the built
+        # package into a clean environment and run their checker over their code.
         run: |
           uv venv /tmp/typed --python ${{ matrix.python-version }}
           uv pip install --python /tmp/typed/bin/python . mypy
           cat > /tmp/user_code.py <<'PY'
-          from xdg_kit import runtime_dir
+          from credbox import runtime_dir
 
-          # create is bool; a str is not, so a checker that can see the shipped hints
-          # must reject it and name the expected type.
+          # create is bool; a str is not, so a checker that can see the shipped hints must reject it
+          # and name the expected type.
           runtime_dir("app", create="yes")
           PY
           /tmp/typed/bin/mypy /tmp/user_code.py > /tmp/mypy_out 2>&1 || true
