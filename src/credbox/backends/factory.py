@@ -41,10 +41,10 @@ def encrypted_backend(*, passphrase: Secret) -> SecretBackend:
 
     Raises:
         MissingExtraError: the ``cryptography`` distribution is not installed (install
-            ``credbox[crypt]``).
+            ``credbox[crypto]``).
     """
     if importlib.util.find_spec("cryptography") is None:
-        raise MissingExtraError(extra="crypt", dist="credbox[crypt]")
+        raise MissingExtraError(extra="crypto", dist="credbox[crypto]")
     from credbox.backends.encrypted import EncryptedFileBackend  # outside any except
     return EncryptedFileBackend(passphrase=passphrase)
 

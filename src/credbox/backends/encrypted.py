@@ -1,4 +1,4 @@
-"""The encrypted file backend ([crypt] extra): a single AES-GCM blob keyed by an Argon2id hash
+"""The encrypted file backend ([crypto] extra): a single AES-GCM blob keyed by an Argon2id hash
 of a passphrase.
 
 TERMINAL -- there is no fallback: a decrypt failure (wrong passphrase or tampering) FAILS CLOSED

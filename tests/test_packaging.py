@@ -27,5 +27,5 @@ def test_console_scripts_are_declared() -> None:
 
 def test_optional_extras_are_declared() -> None:
     extras = metadata.metadata("credbox").get_all("Provides-Extra") or []
-    for extra in ("keyring", "crypt", "all"):
+    for extra in ("keyring", "crypto", "all"):
         assert extra in extras

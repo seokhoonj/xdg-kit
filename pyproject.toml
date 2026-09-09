@@ -38,11 +38,11 @@ Issues     = "https://github.com/seokhoonj/credbox/issues"
 
 [project.optional-dependencies]
 keyring = ["keyring>=24"]
-crypt   = ["cryptography>=42"]
-all     = ["keyring>=24", "cryptography>=42"]
+crypto  = ["cryptography>=44"]
+all     = ["keyring>=24", "cryptography>=44"]
 dev = [
     "keyring>=24",
-    "cryptography>=42",
+    "cryptography>=44",
     "mypy>=1.11",
     "pytest>=8.0",
     "ruff>=0.6",

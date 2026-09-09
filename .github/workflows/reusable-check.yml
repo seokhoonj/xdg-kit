@@ -36,7 +36,7 @@ jobs:
         # A venv per matrix version, not `uv pip --system`: the runner's system Python is
         # externally managed and is one fixed version whatever the matrix says. This is also what
         # the README tells a person to run. `[dev]` pulls both extras, so the full suite exercises
-        # the keyring and crypt backends.
+        # the keyring and crypto backends.
         run: |
           uv venv --python ${{ matrix.python-version }}
           uv pip install -e ".[dev]"
@@ -68,12 +68,12 @@ jobs:
           print('credbox', credbox.__version__, 'imports with no third-party packages')
           "
 
-      - name: Confirm the install variants behave (core-only / [keyring] / [crypt])
+      - name: Confirm the install variants behave (core-only / [keyring] / [crypto])
         # Each install shape must yield a working backend for its extra. The zero-dep core also
         # gates BOTH extras with MissingExtraError -- but that "gated when absent" check is made
         # ONLY in the core-only variant: an extra's dependency can arrive transitively (on Linux
         # `keyring` pulls SecretStorage, which depends on `cryptography`), so a [keyring] venv
-        # legitimately has cryptography and does NOT gate crypt -- and that is correct (the gate
+        # legitimately has cryptography and does NOT gate crypto -- and that is correct (the gate
         # only turns an absent dependency into an actionable error). The gate logic itself is
         # unit-tested in the suite; here we confirm the install shapes, not the transitive graph.
         run: |
@@ -84,7 +84,7 @@ jobs:
             XDG_CONFIG_HOME=$(mktemp -d) "$venv/bin/python" -c "$script"
           }
           # core-only: a FileBackend round-trips; with no extras installed (the zero-dep core pulls
-          # nothing transitively), BOTH keyring and crypt are gated by MissingExtraError.
+          # nothing transitively), BOTH keyring and crypto are gated by MissingExtraError.
           check_variant /tmp/v-core "." "
           from credbox import file_backend, keyring_backend, encrypted_backend, Secret
           from credbox.errors import MissingExtraError
@@ -101,12 +101,12 @@ jobs:
           assert type(keyring_backend(fallback=file_backend())).__name__ == 'KeyringBackend'
           print('[keyring] variant OK')
           "
-          # [crypt]: the encrypted backend round-trips.
-          check_variant /tmp/v-crypt ".[crypt]" "
+          # [crypto]: the encrypted backend round-trips.
+          check_variant /tmp/v-crypto ".[crypto]" "
           from credbox import encrypted_backend, Secret
           b = encrypted_backend(passphrase=Secret('pw')); b.set('app', 'k', value='v')
           assert b.get('app', 'k').reveal() == 'v'
-          print('[crypt] variant OK')
+          print('[crypto] variant OK')
           "
 
       - name: Confirm the console scripts installed

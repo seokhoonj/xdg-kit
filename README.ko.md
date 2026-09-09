@@ -33,7 +33,7 @@ credbox는 `keyring` 생태계의 아이디어를 안전하게 재포장한 것�
 ```sh
 pip install credbox              # 파일 저장소, 런타임 의존성 0
 pip install "credbox[keyring]"   # OS 키링 백엔드 추가
-pip install "credbox[crypt]"     # 암호화 파일 백엔드 추가 (Argon2id + AES-GCM)
+pip install "credbox[crypto]"     # 암호화 파일 백엔드 추가 (Argon2id + AES-GCM)
 pip install "credbox[all]"       # 둘 다
 ```
 
@@ -126,7 +126,7 @@ from credbox import default_backend, file_backend, keyring_backend, encrypted_ba
 Credentials("myapp")                                                    # 파일 저장소 (기본)
 Credentials("myapp", backend=default_backend(use_keyring=True))         # 파일 위에 키링
 Credentials("myapp", backend=keyring_backend(fallback=file_backend()))  # 같은 것, 명시적
-Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암호화 파일 [crypt]
+Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암호화 파일 [crypto]
 ```
 
 - **파일 저장소** (기본, 의존성 0) — 앱 폴더의 `credentials.json`. 어디서나 안정적이며, 값을 0600 평문으로
@@ -138,7 +138,7 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암�
   **fail-closed**입니다: 모든 작업이 조용히 평문을 쓰거나 stale 값을 주는 대신 예외를 냅니다 — 파일 폴백은
   키링 백엔드가 *아예 없을* 때만 닿습니다. (한 가지 주의: 조정은 키링 -> 파일 한 방향만입니다. 키링이
   구조적으로 부재한 동안 파일에 쓴 값은 되돌려 옮겨지지 않으니, 키링이 닿을 때 키를 다시 `set` 하세요.)
-- **암호화 파일** (`[crypt]`) — passphrase의 Argon2id 해시로 키를 만든 단일 AES-GCM blob. **terminal**입니다:
+- **암호화 파일** (`[crypto]`) — passphrase의 Argon2id 해시로 키를 만든 단일 AES-GCM blob. **terminal**입니다:
   틀린 passphrase나 변조된 파일은 내용 없는 `DecryptionError`로 fail-closed하며, 평문 다운그레이드는 없습니다.
   헤더 전체가 인증되고(AES-GCM AAD), 쓰기마다 새 nonce를 뽑으며, 의도적으로 비싼 KDF가 저장소 열 때마다
   ~100ms대 지연을 더합니다 — 버그가 아니라 기능입니다.

@@ -50,7 +50,7 @@ class InvalidAppNameError(CredBoxError, ValueError):
 
 
 class DecryptionError(CredBoxError):
-    """[crypt] The encrypted store could not be decrypted: a wrong passphrase or tampering
+    """[crypto] The encrypted store could not be decrypted: a wrong passphrase or tampering
     (an AES-GCM tag failure). Content-free by construction -- raised from a returning frame
     so that both ``__cause__`` and ``__context__`` are ``None`` and the underlying
     ``InvalidTag`` never rides along."""

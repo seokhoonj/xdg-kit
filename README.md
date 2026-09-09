@@ -33,7 +33,7 @@ unit — not a novel vault. Directories follow the
 ```sh
 pip install credbox              # file store, zero runtime dependencies
 pip install "credbox[keyring]"   # add the optional OS keyring backend
-pip install "credbox[crypt]"     # add the optional encrypted-file backend (Argon2id + AES-GCM)
+pip install "credbox[crypto]"     # add the optional encrypted-file backend (Argon2id + AES-GCM)
 pip install "credbox[all]"       # both
 ```
 
@@ -127,7 +127,7 @@ from credbox import default_backend, file_backend, keyring_backend, encrypted_ba
 Credentials("myapp")                                                    # file store (default)
 Credentials("myapp", backend=default_backend(use_keyring=True))         # keyring over file
 Credentials("myapp", backend=keyring_backend(fallback=file_backend()))  # the same, explicit
-Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encrypted file [crypt]
+Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encrypted file [crypto]
 ```
 
 - **File store** (default, zero-dep) — a `credentials.json` in the app's folder. Works reliably
@@ -142,7 +142,7 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
   keyring backend exists *at all*. (One caveat: reconciliation runs only keyring → file; a value
   written to the file while the keyring was structurally absent is not migrated back, so re-set the
   key while the keyring is reachable.)
-- **Encrypted file** (`[crypt]`) — a single AES-GCM blob keyed by an Argon2id hash of a passphrase.
+- **Encrypted file** (`[crypto]`) — a single AES-GCM blob keyed by an Argon2id hash of a passphrase.
   It is **terminal**: a wrong passphrase or a tampered file fails closed with a content-free
   `DecryptionError`, never a plaintext downgrade. The whole header is authenticated (AES-GCM AAD),
   a fresh nonce is drawn per write, and the deliberately expensive KDF adds ~100 ms-scale latency

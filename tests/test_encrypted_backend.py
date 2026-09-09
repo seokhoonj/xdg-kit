@@ -1,4 +1,4 @@
-"""Tests for the [crypt] encrypted backend: roundtrip, fail-closed decryption, AAD-bound header,
+"""Tests for the [crypto] encrypted backend: roundtrip, fail-closed decryption, AAD-bound header,
 and nonce freshness. Requires the ``cryptography`` extra (installed in the dev env)."""
 
 from __future__ import annotations

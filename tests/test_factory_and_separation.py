@@ -59,8 +59,8 @@ def test_crypt_factory_reports_missing_extra_when_absent(monkeypatch: pytest.Mon
     _simulate_absent(monkeypatch, "cryptography")
     with pytest.raises(MissingExtraError) as excinfo:
         encrypted_backend(passphrase=Secret("pw"))
-    assert excinfo.value.extra == "crypt"
-    assert excinfo.value.dist == "credbox[crypt]"
+    assert excinfo.value.extra == "crypto"
+    assert excinfo.value.dist == "credbox[crypto]"
 
 
 def test_missing_extra_error_is_also_an_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
