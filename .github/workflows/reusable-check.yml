@@ -34,12 +34,13 @@ jobs:
 
       - name: Install
         # A venv per matrix version, not `uv pip --system`: the runner's system Python is
-        # externally managed and is one fixed version whatever the matrix says. This is also what
-        # the README tells a person to run. `[dev]` pulls both extras, so the full suite exercises
-        # the keyring and crypto backends.
+        # externally managed and is one fixed version whatever the matrix says. The `dev`
+        # dependency group (PEP 735) pulls both optional backends plus the tooling, so the full
+        # suite exercises keyring and crypto; it is a group, not a published extra, so it never
+        # appears in the distribution's `Provides-Extra`.
         run: |
           uv venv --python ${{ matrix.python-version }}
-          uv pip install -e ".[dev]"
+          uv pip install -e . --group dev
           .venv/bin/python -c "import sys; print('testing on', sys.version)"
 
       - name: Test

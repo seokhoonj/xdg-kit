@@ -29,3 +29,6 @@ def test_optional_extras_are_declared() -> None:
     extras = metadata.metadata("credbox").get_all("Provides-Extra") or []
     for extra in ("keyring", "crypto", "all"):
         assert extra in extras
+    # `dev` is a PEP 735 dependency group, not a published extra -- it must not leak into the
+    # distribution's user-facing surface.
+    assert "dev" not in extras

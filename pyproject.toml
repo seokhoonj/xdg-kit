@@ -40,6 +40,17 @@ Issues     = "https://github.com/seokhoonj/credbox/issues"
 keyring = ["keyring>=24"]
 crypto  = ["cryptography>=44"]
 all     = ["keyring>=24", "cryptography>=44"]
+
+[project.scripts]
+credbox                = "credbox.cli:main"
+git-credential-credbox = "credbox.gitcredential:main"
+
+# Development tooling is a PEP 735 dependency group, not a published extra: it stays out of the
+# distribution metadata (no `Provides-Extra: dev`), so the user-facing extras are only keyring /
+# crypto / all. Install it for local work or CI with `uv pip install -e . --group dev` (or
+# `pip install -e . --group dev`). The keyring + cryptography here let the full suite exercise both
+# optional backends.
+[dependency-groups]
 dev = [
     "keyring>=24",
     "cryptography>=44",
@@ -47,10 +58,6 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
-
-[project.scripts]
-credbox                = "credbox.cli:main"
-git-credential-credbox = "credbox.gitcredential:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/credbox"]
