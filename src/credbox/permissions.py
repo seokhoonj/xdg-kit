@@ -51,17 +51,17 @@ def warn_if_group_or_world_readable(path: Path, *, app: str) -> None:
     ``app`` names the program in the message so the warning reads in its voice."""
     if os.name != "posix":
         return
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return
+    if not mode & 0o077:
+        return   # safe file: the common case takes no lock, so reads never serialize on each other
+    # Only a permissive file reaches here. The check-and-record then runs under a lock so two
+    # threads seeing the same permissive path cannot both print the warning.
     key = str(path)
-    # The check-stat-record sequence runs under a lock so two threads reading the same file
-    # cannot both pass the "already warned?" test and print the warning twice.
     with _warn_lock:
         if key in _warned_permissive_paths:
-            return
-        try:
-            mode = path.stat().st_mode
-        except OSError:
-            return
-        if not mode & 0o077:
             return
         _warned_permissive_paths.add(key)
     # A file path is not a secret value; the warning names it so the user can fix it.

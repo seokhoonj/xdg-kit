@@ -37,6 +37,26 @@ def test_concurrent_sets_from_many_threads_all_survive() -> None:
     assert FileBackend().names("myapp") == sorted(f"k{i}" for i in range(count))
 
 
+def test_degraded_cross_process_locking_warns_once_and_still_writes(monkeypatch, capsys) -> None:
+    # When the OS lock cannot be taken (a filesystem with no working flock), the write is NOT
+    # failed closed -- it proceeds under the thread lock alone -- but the loss of cross-process
+    # serialization is announced once per store, not silently.
+    from credbox.backends import _store
+
+    monkeypatch.setattr(_store, "lock_exclusive", lambda handle, *, blocking: False)
+    _store._warned_no_oslock.clear()
+    backend = FileBackend()
+    backend.set("myapp", "a", value="va")
+    backend.set("myapp", "b", value="vb")   # same store path -> must not warn a second time
+
+    err = capsys.readouterr().err
+    assert err.count("cross-process locking is unavailable") == 1
+    got_a = backend.get("myapp", "a")
+    got_b = backend.get("myapp", "b")
+    assert got_a is not None and got_a.reveal() == "va"   # the write still succeeded
+    assert got_b is not None and got_b.reveal() == "vb"
+
+
 def test_set_then_get_returns_a_secret() -> None:
     backend = FileBackend()
     backend.set("myapp", "api_key", value=SECRET)
