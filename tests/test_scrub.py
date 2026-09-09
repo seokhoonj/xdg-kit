@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from credbox.scrub import REDACTION, scrub_exception, scrub_secrets
 
 
@@ -97,6 +99,20 @@ def test_scrub_survives_secrets_iterator_that_raises_mid_iteration():
     assert scrub_secrets("has sk-secret", secrets_then_boom()) == "has sk-secret"
     err = ValueError("sk-secret here")
     assert scrub_exception(err, secrets_then_boom()) is err
+
+
+def test_scrub_propagates_memory_error_instead_of_returning_unscrubbed():
+    # Ordinary exceptions from `secrets` are swallowed so scrub never raises on the error path,
+    # but MemoryError must propagate: swallowing it would return the still-unscrubbed, secret-
+    # bearing text/err as the result -- a worse leak than a MemoryError, which carries no secret.
+    def secrets_then_oom():
+        yield "sk-secret"
+        raise MemoryError("out of memory")
+
+    with pytest.raises(MemoryError):
+        scrub_secrets("has sk-secret", secrets_then_oom())
+    with pytest.raises(MemoryError):
+        scrub_exception(ValueError("sk-secret here"), secrets_then_oom())
 
 
 def test_scrub_exception_walks_context_chain():

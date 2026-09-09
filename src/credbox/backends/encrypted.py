@@ -47,8 +47,8 @@ _WRITE_PARALLELISM = 4
 # check can reject it. A legitimate header's params sit inside these bounds, so clamping is a
 # no-op for it; only a tampered header is reshaped (and then fails the tag check anyway).
 _MAX_TIME_COST = 16
-_MAX_MEMORY_COST_KIB = 1 << 20   # 1 GiB in KiB
-_MAX_PARALLELISM = 16
+_MAX_MEMORY_COST_KIB = 4 * _WRITE_MEMORY_COST_KIB   # 256 MiB -- bounds a tampered-header alloc close
+_MAX_PARALLELISM = 16                               #   to the legitimate write cost, still a no-op for it
 
 
 class EncryptedFileBackend:
@@ -157,7 +157,10 @@ def _derive_key(passphrase: str, salt: bytes, *, time_cost: int, memory_cost: in
         lanes=lanes,
         memory_cost=memory_cost,
     )
-    return kdf.derive(passphrase.encode("utf-8"))
+    # surrogatepass: a passphrase holding a lone surrogate (e.g. sourced from an env var via
+    # surrogateescape) encodes to deterministic bytes instead of raising UnicodeEncodeError, whose
+    # .object/.args and this frame's locals (passphrase, plaintext) would otherwise leak the secret.
+    return kdf.derive(passphrase.encode("utf-8", "surrogatepass"))
 
 
 def _encrypt(plaintext: bytes, passphrase: str) -> bytes:

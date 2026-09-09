@@ -5,7 +5,7 @@ When the OS keyring has no backend (cron, containers, servers) the operation is 
 secrets are in the file, not the keyring. When the keyring works it is authoritative, and a
 successful write/delete also clears any stale plaintext copy from the fallback.
 
-**Leak contract (the P1 fix).** A keyring call can raise a third-party exception whose ``str()``
+**Leak contract.** A keyring call can raise a third-party exception whose ``str()``
 embeds a secret. Every such exception is caught *inside* a returning-frame helper
 (``_try_keyring_*``) and never escapes; the ``CredentialsError`` a caller sees is built from safe
 fields only (``app``, ``name``, a fixed phrase) and raised where no exception is in flight, so
@@ -22,6 +22,7 @@ Re-set the key while the keyring is reachable.
 from __future__ import annotations
 
 import sys
+import threading
 from typing import Literal
 
 from credbox.backends._store import normalize_secret_value
@@ -37,6 +38,7 @@ __all__ = ["KeyringBackend"]
 KeyringStatus = Literal["ok", "no_backend", "failed"]
 
 _warned_keyring_fallback = False
+_warn_lock = threading.Lock()
 
 
 class KeyringBackend:
@@ -189,6 +191,14 @@ def _keyring_operation_error(app: str, name: str) -> CredentialsError:
 # just ImportError) because executing keyring's __init__ (backend/D-Bus discovery) can raise a
 # non-ImportError, which must be folded into a status here rather than escape as a raw traceback
 # whose frame retains `raw`.
+#
+# The catch is deliberately total -- it does NOT re-raise MemoryError the way storecodec/scrub do.
+# Those run with no secret in frame; _try_keyring_set runs with `raw` bound, so re-raising ANY
+# exception (MemoryError included) would keep this frame alive on the propagating traceback and
+# carry `raw` out with it. Leak-containment therefore outranks surfacing a MemoryError here: a
+# swallowed OOM degrades to a status ("failed" -> fail-closed raise; "no_backend" -> fallback),
+# never a plaintext-bearing traceback. BaseException (KeyboardInterrupt/SystemExit) is not an
+# Exception, so it still propagates -- and it carries no secret text of its own.
 
 
 def _try_keyring_get(app: str, name: str) -> tuple[KeyringStatus, str | None]:
@@ -246,9 +256,10 @@ def _warn_keyring_fallback_once() -> None:
     backend instead. Content-free: it never interpolates the third-party error, whose text could
     embed a secret."""
     global _warned_keyring_fallback
-    if _warned_keyring_fallback:
-        return
-    _warned_keyring_fallback = True
+    with _warn_lock:
+        if _warned_keyring_fallback:
+            return
+        _warned_keyring_fallback = True
     print(
         "credbox: warning: OS keyring unavailable; using the file backend "
         "(credentials.json, mode 0600) instead",

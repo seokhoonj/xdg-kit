@@ -116,6 +116,8 @@ class Credentials:
             ValueError: ``value`` is empty or whitespace-only -- a blank would list under
                 ``names`` yet resolve to ``None``, so it is refused to keep set and get consistent.
             CredentialsError: the store could not be written.
+            DecryptionError: with an encrypted backend, the existing store had to be read to
+                merge the new value and could not be decrypted (a wrong passphrase or tampering).
         """
         raw = value.reveal() if isinstance(value, Secret) else value
         raw = raw.strip()
@@ -128,6 +130,8 @@ class Credentials:
 
         Raises:
             CredentialsError: the store could not be written.
+            DecryptionError: with an encrypted backend, the existing store had to be read to
+                remove the name and could not be decrypted (a wrong passphrase or tampering).
         """
         self._backend.unset(self._app, name)
 

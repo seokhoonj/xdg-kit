@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
+import threading
 from pathlib import Path
 
 from credbox.errors import CredBoxError, InsecureStorageError
@@ -40,6 +41,7 @@ PRIVATE_FILE_MODE = 0o600
 PRIVATE_DIR_MODE = 0o700
 
 _warned_permissive_paths: set[str] = set()
+_warn_lock = threading.Lock()
 
 
 def warn_if_group_or_world_readable(path: Path, *, app: str) -> None:
@@ -47,19 +49,26 @@ def warn_if_group_or_world_readable(path: Path, *, app: str) -> None:
     should be mode 0600. POSIX-only and best-effort: a ``stat`` failure is ignored (the read
     that called this already succeeded), and the same path warns at most once per process.
     ``app`` names the program in the message so the warning reads in its voice."""
-    if os.name != "posix" or str(path) in _warned_permissive_paths:
+    if os.name != "posix":
         return
-    try:
-        mode = path.stat().st_mode
-    except OSError:
-        return
-    if mode & 0o077:
-        _warned_permissive_paths.add(str(path))
-        # A file path is not a secret value; the warning names it so the user can fix it.
-        print(
-            f"{app}: warning: {path} is accessible by group/other; restrict it with 'chmod 600'",
-            file=sys.stderr,
-        )
+    key = str(path)
+    # The check-stat-record sequence runs under a lock so two threads reading the same file
+    # cannot both pass the "already warned?" test and print the warning twice.
+    with _warn_lock:
+        if key in _warned_permissive_paths:
+            return
+        try:
+            mode = path.stat().st_mode
+        except OSError:
+            return
+        if not mode & 0o077:
+            return
+        _warned_permissive_paths.add(key)
+    # A file path is not a secret value; the warning names it so the user can fix it.
+    print(
+        f"{app}: warning: {path} is accessible by group/other; restrict it with 'chmod 600'",
+        file=sys.stderr,
+    )
 
 
 def ensure_dir(path: Path, *, private: bool = False) -> Path:

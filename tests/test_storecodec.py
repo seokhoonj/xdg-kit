@@ -1,6 +1,6 @@
 """Tests for the leak-safe store codec.
 
-These pin the council-review fixes: narrow catches (a ``KeyboardInterrupt``/``MemoryError``
+These pin the leak-safety invariants: narrow catches (a ``KeyboardInterrupt``/``MemoryError``
 must propagate, not be swallowed into a fault), the ``NOT_STRING_VALUE`` guard that keeps a
 tampered non-string value out of ``Secret(str)``, and the leak guarantee that no fault ever
 carries secret content.

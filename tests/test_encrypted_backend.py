@@ -106,7 +106,7 @@ def test_garbage_or_truncated_blob_fails_closed_content_free(blob: bytes) -> Non
 def test_recursion_error_in_the_header_parse_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     # A tampered header whose JSON nests thousands of levels raises RecursionError in json.loads;
     # it must be folded into a content-free DecryptionError, not escape as a traceback whose frames
-    # retain passphrase/blob. Mock-forced (PY 10.10) rather than building the crashing input.
+    # retain passphrase/blob. Mock-forced rather than building the crashing input.
     backend = _backend()
     backend.set("myapp", "api_key", value=SECRET)
 
@@ -116,6 +116,30 @@ def test_recursion_error_in_the_header_parse_fails_closed(monkeypatch: pytest.Mo
     monkeypatch.setattr("credbox.backends.encrypted.json.loads", _raise)
     with pytest.raises(DecryptionError):
         _backend().get("myapp", "api_key")
+
+
+def test_set_on_a_store_written_with_another_passphrase_fails_closed() -> None:
+    # set() must read-merge the existing store first, so a wrong passphrase fails closed there
+    # rather than silently overwriting the store under a new key (which would strand the old data).
+    _backend(Secret("right-passphrase")).set("myapp", "api_key", value=SECRET)
+    with pytest.raises(DecryptionError):
+        _backend(Secret("wrong-passphrase")).set("myapp", "other", value="v")
+
+
+def test_unset_on_a_store_written_with_another_passphrase_fails_closed() -> None:
+    _backend(Secret("right-passphrase")).set("myapp", "api_key", value=SECRET)
+    with pytest.raises(DecryptionError):
+        _backend(Secret("wrong-passphrase")).unset("myapp", "api_key")
+
+
+def test_lone_surrogate_passphrase_roundtrips() -> None:
+    # A passphrase holding a lone surrogate (e.g. sourced from an env var via surrogateescape)
+    # must encode deterministically via surrogatepass on both write and read, not crash with a
+    # UnicodeEncodeError whose frame would carry the passphrase.
+    passphrase = Secret("pw-\udc80-\udcff")
+    _backend(passphrase).set("myapp", "api_key", value=SECRET)
+    got = _backend(passphrase).get("myapp", "api_key")
+    assert got is not None and got.reveal() == SECRET
 
 
 def test_each_encryption_uses_a_fresh_nonce() -> None:

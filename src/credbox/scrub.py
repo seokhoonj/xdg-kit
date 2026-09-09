@@ -5,9 +5,13 @@ unscrubbed exception can leak the very secret it failed to use into a log or a t
 ``scrub_secrets`` replaces each known secret value -- and its URL-encoded forms -- in a string
 with ``***``; ``scrub_exception`` walks an exception and its ``__cause__`` / ``__context__``
 chain and scrubs each node's ``args``, its transport URLs (``url``, ``request.url``,
-``response.url``), and its ``__notes__`` in place. Both are best-effort and never raise -- they
-run on the error path, where a second failure would mask the first. The caller supplies the
-secret *values* to redact; this module never reads a store.
+``response.url``), and its ``__notes__`` in place. Both are best-effort: they run on the error
+path, where a second failure would mask the first, so any *ordinary* exception while inspecting a
+node is swallowed. The one carve-out is ``MemoryError`` (and ``KeyboardInterrupt`` / ``SystemExit``,
+which are not ``Exception`` and propagate anyway): it is re-raised rather than swallowed, because
+swallowing it would return the still-unscrubbed, secret-bearing text as the function's result --
+a worse leak than the bare ``MemoryError``, whose own ``str`` carries no secret. The caller
+supplies the secret *values* to redact; this module never reads a store.
 """
 
 from __future__ import annotations
@@ -32,6 +36,8 @@ def scrub_secrets(text: str, secrets: Iterable[str]) -> str:
     ``secrets`` leaves ``text`` unchanged."""
     try:
         secret_values = [value for value in secrets if isinstance(value, str) and value]
+    except MemoryError:
+        raise   # never swallow OOM into a return of the still-unscrubbed text (see module docstring)
     except Exception:
         # a non-iterable or mid-iteration-raising `secrets` must not raise on the error path
         return text
@@ -53,6 +59,8 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
     so also pass the rendered log line through ``scrub_secrets`` before emitting it."""
     try:
         secret_values = [value for value in secrets if isinstance(value, str) and value]
+    except MemoryError:
+        raise   # never swallow OOM into a return of the still-unscrubbed error (see module docstring)
     except Exception:
         return err   # a non-iterable or raising `secrets` must not mask the original error
     if not secret_values:
@@ -97,6 +105,8 @@ def _scrub_node(node: BaseException, secret_values: list[str]) -> None:
             node.args = tuple(
                 scrub_secrets(arg, secret_values) if isinstance(arg, str) else arg for arg in args
             )
+    except MemoryError:
+        raise   # never swallow OOM into leaving `args` unscrubbed on the node
     except Exception:
         pass   # a custom .args accessor may raise; the never-raise contract wins here
     _scrub_url_attr(node, secret_values)
@@ -114,6 +124,8 @@ def _scrub_node(node: BaseException, secret_values: list[str]) -> None:
                 scrub_secrets(note, secret_values) if isinstance(note, str) else note
                 for note in notes
             ]
+    except MemoryError:
+        raise   # never swallow OOM into leaving `__notes__` unscrubbed on the node
     except Exception:
         pass   # a custom __notes__ may not be assignable; never on the error path
 
@@ -129,5 +141,7 @@ def _scrub_url_attr(obj: object, secret_values: list[str]) -> None:
     if isinstance(url, str):
         try:
             obj.url = scrub_secrets(url, secret_values)  # type: ignore[attr-defined]
+        except MemoryError:
+            raise   # never swallow OOM into leaving the URL unscrubbed on the node
         except Exception:
             pass   # a read-only or custom url property: cannot rewrite it, and must not raise
