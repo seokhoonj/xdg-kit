@@ -7,7 +7,7 @@
 
 **English** | [한국어](README.ko.md)
 
-A secure, XDG-located **secret store** for Python apps and CLIs — leak-safe by construction.
+A secure **secret store** for Python apps and CLIs — XDG paths by default, OS-native (macOS/Windows) on request — leak-safe by construction.
 
 Every command-line app has to resolve its secrets and find where its files live. credbox does
 both, once, the same way on every OS — and treats *not leaking the secret* as the whole job:
