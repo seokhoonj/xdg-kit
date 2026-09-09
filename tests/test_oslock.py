@@ -7,8 +7,8 @@ import os
 
 import pytest
 
-from xdg_kit import _oslock
-from xdg_kit._oslock import lock_exclusive, unlock
+from credbox import _oslock
+from credbox._oslock import lock_exclusive, unlock
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="advisory file locks")
 

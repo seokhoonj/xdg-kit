@@ -6,9 +6,9 @@ import os
 
 import pytest
 
-from xdg_kit import permissions
-from xdg_kit.errors import InsecureStorageError
-from xdg_kit.permissions import (
+from credbox import permissions
+from credbox.errors import InsecureStorageError
+from credbox.permissions import (
     ensure_private_dir,
     restrict_dir_to_owner,
     warn_if_group_or_world_readable,

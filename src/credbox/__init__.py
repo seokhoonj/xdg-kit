@@ -7,6 +7,7 @@ and never imports an optional extra (``keyring``/``cryptography``).
 
 from __future__ import annotations
 
+from credbox.atomic import write_bytes_atomic, write_text_atomic
 from credbox.environment import (
     colliding_env_var_prefixes,
     env_var_prefix,
@@ -21,8 +22,19 @@ from credbox.errors import (
     MissingExtraError,
     NoKeyringError,
 )
+from credbox.jsonfile import read_json
 from credbox.layout import Layout, default_layout, set_default_layout
+from credbox.locking import FileLock, single_instance
 from credbox.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
+from credbox.permissions import (
+    ensure_dir,
+    ensure_private_dir,
+    restrict_dir_to_owner,
+    warn_if_group_or_world_readable,
+)
+from credbox.relocation import relocate_once
+from credbox.runtime import runtime_dir
+from credbox.scrub import scrub_exception, scrub_secrets
 from credbox.secret import Secret, mask_secret
 
 __all__ = [
@@ -50,4 +62,18 @@ __all__ = [
     "env_var_prefix",
     "colliding_env_var_prefixes",
     "read_absolute_path_override",
+    # storage primitives
+    "write_bytes_atomic",
+    "write_text_atomic",
+    "read_json",
+    "relocate_once",
+    "ensure_dir",
+    "ensure_private_dir",
+    "restrict_dir_to_owner",
+    "warn_if_group_or_world_readable",
+    "runtime_dir",
+    "FileLock",
+    "single_instance",
+    "scrub_secrets",
+    "scrub_exception",
 ]
