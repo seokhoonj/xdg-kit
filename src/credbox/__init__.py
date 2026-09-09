@@ -8,6 +8,14 @@ and never imports an optional extra (``keyring``/``cryptography``).
 from __future__ import annotations
 
 from credbox.atomic import write_bytes_atomic, write_text_atomic
+from credbox.backends import (
+    FileBackend,
+    SecretBackend,
+    default_backend,
+    encrypted_backend,
+    file_backend,
+    keyring_backend,
+)
 from credbox.environment import (
     colliding_env_var_prefixes,
     env_var_prefix,
@@ -76,4 +84,11 @@ __all__ = [
     "single_instance",
     "scrub_secrets",
     "scrub_exception",
+    # backends (core + factories only; extra classes are reached via the factories)
+    "SecretBackend",
+    "FileBackend",
+    "file_backend",
+    "keyring_backend",
+    "encrypted_backend",
+    "default_backend",
 ]

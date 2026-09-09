@@ -1,0 +1,84 @@
+"""Tests for the zero-dep file backend: the Secret return type, idempotent unset, and the
+content-free CredentialsError for a malformed store (the leak guarantee)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from credbox.backends.file import FileBackend
+from credbox.errors import CredentialsError
+from credbox.secret import Secret
+
+SECRET = "sk_live_TOPSECRET_0123456789"
+
+
+def test_set_then_get_returns_a_secret() -> None:
+    backend = FileBackend()
+    backend.set("myapp", "api_key", value=SECRET)
+    got = backend.get("myapp", "api_key")
+    assert isinstance(got, Secret)
+    assert got.reveal() == SECRET
+
+
+def test_get_absent_returns_none() -> None:
+    assert FileBackend().get("myapp", "absent") is None
+
+
+def test_set_accepts_a_secret_value() -> None:
+    backend = FileBackend()
+    backend.set("myapp", "api_key", value=Secret(SECRET))
+    assert backend.get("myapp", "api_key").reveal() == SECRET  # type: ignore[union-attr]
+
+
+def test_the_stored_file_is_mode_0600(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX mode bits only")
+    backend = FileBackend()
+    backend.set("myapp", "api_key", value=SECRET)
+    path = backend.path("myapp")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_unset_removes_a_key() -> None:
+    backend = FileBackend()
+    backend.set("myapp", "api_key", value=SECRET)
+    backend.unset("myapp", "api_key")
+    assert backend.get("myapp", "api_key") is None
+
+
+def test_unset_missing_name_is_a_noop() -> None:
+    FileBackend().unset("myapp", "never_set")   # must not raise
+
+
+def test_names_lists_keys_sorted_never_values() -> None:
+    backend = FileBackend()
+    backend.set("myapp", "b_key", value="vb")
+    backend.set("myapp", "a_key", value="va")
+    assert backend.names("myapp") == ["a_key", "b_key"]
+
+
+def test_malformed_store_raises_content_free_error() -> None:
+    backend = FileBackend()
+    path = backend.path("myapp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'{"api_key": "' + SECRET.encode() + b'" THIS IS NOT JSON')
+    with pytest.raises(CredentialsError) as excinfo:
+        backend.get("myapp", "api_key")
+    err = excinfo.value
+    assert SECRET not in str(err)
+    assert err.__cause__ is None
+    assert err.__context__ is None
+
+
+def test_non_string_value_in_store_raises_and_does_not_reach_secret() -> None:
+    backend = FileBackend()
+    path = backend.path("myapp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'{"api_key": {"nested": 1}}')
+    with pytest.raises(CredentialsError):
+        backend.get("myapp", "api_key")
