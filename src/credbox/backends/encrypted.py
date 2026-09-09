@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from credbox.atomic import write_bytes_atomic
-from credbox.backends.file import _exclusive_store_lock, _normalize_secret_value
+from credbox.backends._store import exclusive_store_lock, normalize_secret_value
 from credbox.errors import CredBoxError, CredentialsError, DecryptionError
 from credbox.paths import config_dir
 from credbox.permissions import PRIVATE_FILE_MODE, restrict_dir_to_owner
@@ -73,7 +73,7 @@ class EncryptedFileBackend:
                 tampering) -- content-free, ``__cause__`` and ``__context__`` both ``None``.
             CredentialsError: the store is unreadable, or decrypts to a malformed map.
         """
-        cleaned = _normalize_secret_value(self._load(app).get(name))
+        cleaned = normalize_secret_value(self._load(app).get(name))
         return Secret(cleaned) if cleaned is not None else None
 
     def set(self, app: str, name: str, *, value: str | Secret) -> None:
@@ -85,7 +85,7 @@ class EncryptedFileBackend:
             CredentialsError: the store is unreadable, or the write failed.
         """
         raw = value.reveal() if isinstance(value, Secret) else value
-        with _exclusive_store_lock(self.path(app)):
+        with exclusive_store_lock(self.path(app)):
             store = self._load(app)
             store[name] = raw
             self._save(app, store)
@@ -98,7 +98,7 @@ class EncryptedFileBackend:
             DecryptionError: the existing store could not be decrypted.
             CredentialsError: the store is unreadable, or the write failed.
         """
-        with _exclusive_store_lock(self.path(app)):
+        with exclusive_store_lock(self.path(app)):
             store = self._load(app)
             if name in store:
                 del store[name]

@@ -10,14 +10,10 @@ cross-process lock so concurrent writers do not lose each other's keys.
 
 from __future__ import annotations
 
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from typing import IO
 
-from credbox._oslock import lock_exclusive, unlock
 from credbox.atomic import write_bytes_atomic
+from credbox.backends._store import exclusive_store_lock, normalize_secret_value
 from credbox.errors import CredBoxError, CredentialsError
 from credbox.paths import config_dir
 from credbox.permissions import (
@@ -51,7 +47,7 @@ class FileBackend:
                 object, or holds a non-string value -- built from the fault kind and JSON
                 position only, never the file's content.
         """
-        cleaned = _normalize_secret_value(self._load(app).get(name))
+        cleaned = normalize_secret_value(self._load(app).get(name))
         return Secret(cleaned) if cleaned is not None else None
 
     def set(self, app: str, name: str, *, value: str | Secret) -> None:
@@ -63,7 +59,7 @@ class FileBackend:
             CredentialsError: the existing file is unreadable or malformed, or the write failed.
         """
         raw = value.reveal() if isinstance(value, Secret) else value
-        with _exclusive_store_lock(self.path(app)):
+        with exclusive_store_lock(self.path(app)):
             secret_value_by_name = self._load(app)
             secret_value_by_name[name] = raw
             self._save(app, secret_value_by_name)
@@ -75,7 +71,7 @@ class FileBackend:
         Raises:
             CredentialsError: the existing file is unreadable or malformed, or the write failed.
         """
-        with _exclusive_store_lock(self.path(app)):
+        with exclusive_store_lock(self.path(app)):
             secret_value_by_name = self._load(app)
             if name in secret_value_by_name:
                 del secret_value_by_name[name]
@@ -141,62 +137,3 @@ def _fault_error(path: Path, fault: StoreFault) -> CredentialsError:
     else:
         detail = "malformed"
     return CredentialsError(f"{path} is {detail}")
-
-
-def _normalize_secret_value(value: object) -> str | None:
-    """A stored value normalised to a non-empty string, or ``None`` -- so a blank entry reads as
-    absent and falls through to the next resolution tier."""
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-# --- store write serialization ------------------------------------------------
-#
-# A file store's set/unset is a read-modify-write: load the JSON, change one key, write it back.
-# The atomic write guards against a *torn* file, not a lost *update* -- two writers that both
-# read the old map each write back their own change, and the last one wins, dropping the other's
-# key. So the whole critical section is held under a lock that serializes across threads (a
-# per-path threading.Lock) and processes (a blocking OS lock on a sibling .lock file, which --
-# unlike credentials.json -- is never replaced, so an atomic rename cannot orphan a holder's
-# lock). Where the OS lock cannot be taken, it degrades to the thread lock alone.
-
-_thread_lock_by_store_path: dict[str, threading.Lock] = {}
-_thread_lock_registry_guard = threading.Lock()
-
-
-def _thread_lock_for(store_path: str) -> threading.Lock:
-    """The process-wide lock for the store at ``store_path``, created on first use."""
-    with _thread_lock_registry_guard:
-        lock = _thread_lock_by_store_path.get(store_path)
-        if lock is None:
-            lock = threading.Lock()
-            _thread_lock_by_store_path[store_path] = lock
-        return lock
-
-
-@contextmanager
-def _exclusive_store_lock(path: Path) -> Iterator[None]:
-    """Hold an exclusive lock over a read-modify-write of the store file ``path``. Degrades to
-    thread-only serialization where no OS lock primitive exists, the lock file cannot be created,
-    or the OS lock cannot be taken -- the in-process guarantee still holds. Shared by the
-    encrypted backend so its writes serialize against the file backend's on the same store."""
-    thread_lock = _thread_lock_for(str(path))
-    thread_lock.acquire()
-    try:
-        restrict_dir_to_owner(path.parent)
-        try:
-            handle: IO[str] | None = (path.parent / f"{path.name}.lock").open("a+")
-        except OSError:
-            handle = None   # cannot create the lock file: rely on the thread lock alone
-        locked = False
-        try:
-            locked = handle is not None and lock_exclusive(handle, blocking=True)
-            yield
-        finally:
-            if handle is not None:
-                try:
-                    if locked:
-                        unlock(handle)
-                finally:
-                    handle.close()
-    finally:
-        thread_lock.release()

@@ -68,6 +68,12 @@ def test_equality_against_a_non_secret_is_false_and_never_raises() -> None:
     assert (Secret(SECRET) == None) is False  # noqa: E711 - exercising __eq__, not identity
 
 
+def test_eq_returns_notimplemented_for_an_incompatible_type() -> None:
+    # The direct dunder must return NotImplemented so Python can try the reflected comparison; a
+    # bare `return False` would also make `== object()` false, but for the wrong reason.
+    assert Secret(SECRET).__eq__(object()) is NotImplemented
+
+
 def test_secret_is_unhashable() -> None:
     with pytest.raises(TypeError):
         hash(Secret(SECRET))

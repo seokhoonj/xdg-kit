@@ -94,6 +94,7 @@ def test_no_backend_without_fallback_raises_nokeyringerror(monkeypatch: pytest.M
     monkeypatch.setattr(keyring, "get_password", no_backend)
     with pytest.raises(NoKeyringError) as excinfo:
         KeyringBackend().get("app", "name")
+    assert excinfo.value.__cause__ is None
     assert excinfo.value.__context__ is None
 
 

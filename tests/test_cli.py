@@ -8,6 +8,7 @@ import pytest
 
 from credbox.backends.file import FileBackend
 from credbox.cli import main
+from credbox.secret import mask_secret
 
 SECRET = "sk_live_0123456789abcdef"
 
@@ -17,7 +18,7 @@ def test_set_then_masked_get(capsys: pytest.CaptureFixture[str]) -> None:
     capsys.readouterr()
     assert main(["get", "myapp", "api_key"]) == 0
     out = capsys.readouterr().out.strip()
-    assert out != SECRET
+    assert out == mask_secret(SECRET)   # exactly the mask, not merely "not the secret"
     assert SECRET not in out
 
 
@@ -75,7 +76,7 @@ def test_malformed_store_get_prints_no_secret_and_no_traceback(
     rc = main(["get", "myapp", "k"])
     captured = capsys.readouterr()
     assert rc == 1
-    assert "LEAKY_XYZ" not in captured.err
+    assert "LEAKY_XYZ" not in captured.out + captured.err   # neither stream carries the file bytes
     assert "Traceback" not in captured.err
 
 

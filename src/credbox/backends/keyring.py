@@ -22,13 +22,19 @@ Re-set the key while the keyring is reachable.
 from __future__ import annotations
 
 import sys
+from typing import Literal
 
-from credbox.backends.file import _normalize_secret_value
+from credbox.backends._store import normalize_secret_value
 from credbox.backends.protocol import SecretBackend
 from credbox.errors import CredentialsError, NoKeyringError
 from credbox.secret import Secret
 
 __all__ = ["KeyringBackend"]
+
+# The closed vocabulary the returning-frame helpers report. Typed so mypy --strict rejects an
+# off-vocabulary literal at either the producer or a call site -- the branch that chooses between a
+# content-free raise and a file fallback must not mis-branch on a typo.
+KeyringStatus = Literal["ok", "no_backend", "failed"]
 
 _warned_keyring_fallback = False
 
@@ -66,7 +72,7 @@ class KeyringBackend:
             # attacker-planted) file value in place of the authoritative keyring value. Raised
             # where no exception is in flight (it died in _try_keyring_get), so content-free.
             raise _keyring_operation_error(app, name)
-        cleaned = _normalize_secret_value(raw)
+        cleaned = normalize_secret_value(raw)
         if cleaned is not None:
             return Secret(cleaned)
         if self._fallback is not None:
@@ -185,7 +191,7 @@ def _keyring_operation_error(app: str, name: str) -> CredentialsError:
 # whose frame retains `raw`.
 
 
-def _try_keyring_get(app: str, name: str) -> tuple[str, str | None]:
+def _try_keyring_get(app: str, name: str) -> tuple[KeyringStatus, str | None]:
     """Return ``("ok", value)``, ``("no_backend", None)``, or ``("failed", None)``."""
     try:
         import keyring
@@ -200,7 +206,7 @@ def _try_keyring_get(app: str, name: str) -> tuple[str, str | None]:
         return "failed", None
 
 
-def _try_keyring_set(app: str, name: str, raw: str) -> str:
+def _try_keyring_set(app: str, name: str, raw: str) -> KeyringStatus:
     """Return ``"ok"``, ``"no_backend"``, or ``"failed"``."""
     try:
         import keyring
@@ -216,8 +222,9 @@ def _try_keyring_set(app: str, name: str, raw: str) -> str:
         return "failed"
 
 
-def _try_keyring_delete(app: str, name: str) -> str:
-    """Return ``"deleted"`` (including an already-absent key), ``"no_backend"``, or ``"failed"``."""
+def _try_keyring_delete(app: str, name: str) -> KeyringStatus:
+    """Return ``"ok"`` (deleted, including an already-absent key), ``"no_backend"``, or
+    ``"failed"``."""
     try:
         import keyring
         import keyring.errors
@@ -225,9 +232,9 @@ def _try_keyring_delete(app: str, name: str) -> str:
         return "no_backend"
     try:
         keyring.delete_password(app, name)
-        return "deleted"
+        return "ok"
     except keyring.errors.PasswordDeleteError:
-        return "deleted"   # already absent -- unset is idempotent
+        return "ok"   # already absent -- unset is idempotent
     except keyring.errors.NoKeyringError:
         return "no_backend"
     except Exception:
