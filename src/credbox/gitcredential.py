@@ -33,6 +33,9 @@ from credbox.credentials import Credentials
 from credbox.errors import InvalidAppNameError
 from credbox.paths import app_dir_segment
 
+# git transports that use a TLS channel; a credential is served only for these (see _do_get).
+_TLS_PROTOCOLS = frozenset({"https", "ftps"})
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for the ``git-credential-credbox`` console script. Always returns 0 -- git
@@ -65,12 +68,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _do_get(fields: dict[str, str]) -> None:
-    # Refuse to serve a stored credential for a plaintext-http request. credbox scopes a store by
+    # Serve only over a TLS transport (a safelist, not an http denylist). credbox scopes a store by
     # host only (not by protocol), so it cannot tell an http-stored value from an https-stored one;
-    # handing either to git over http risks a downgrade -- a secret saved for https:// leaking onto
-    # the wire in cleartext (a crafted http submodule URL or a redirect is enough). git's own store
-    # helper scopes by protocol for this reason; lacking that, the safe move is to not autofill http.
-    if fields.get("protocol") == "http":
+    # handing either to git over a cleartext transport (http, ftp) risks a downgrade -- a secret
+    # saved for https:// leaking onto the wire (a crafted submodule URL or a redirect is enough).
+    # git always sends `protocol` on a real get, so a missing or non-TLS protocol is refused (git
+    # then prompts). Refusing an unknown/absent scheme fails safe; ssh/git:// never use a
+    # username/password helper, so this cannot break them.
+    if fields.get("protocol") not in _TLS_PROTOCOLS:
         return
     app = _app_of(fields)
     if app is None:
@@ -159,7 +164,12 @@ def _read_fields(stream: TextIO) -> dict[str, str]:
 
 def _write_reply(stream: TextIO, *, username: str, password: str) -> None:
     """Write the git credential reply (the one deliberate raw-secret-to-stdout path) and nothing
-    else."""
+    else. git's line protocol forbids a newline or NUL in a value; if a stored username/password
+    contains one (only possible via a crafted value written through the Python API -- git's own
+    line-based input cannot carry it), writing it verbatim would inject an extra reply line. Refuse
+    to reply in that case: write nothing (git then prompts) rather than emit a malformed reply."""
+    if any(c in username or c in password for c in ("\n", "\r", "\x00")):
+        return
     stream.write(f"username={username}\n")
     stream.write(f"password={password}\n")
     stream.write("\n")

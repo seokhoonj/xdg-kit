@@ -155,7 +155,8 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
   It is **terminal**: a wrong passphrase or a tampered file fails closed with a content-free
   `DecryptionError`, never a plaintext downgrade. The whole header is authenticated (AES-GCM AAD),
   a fresh nonce is drawn per write, and the deliberately expensive KDF adds ~100 ms-scale latency
-  per store open — a feature, not a bug.
+  per store open — a feature, not a bug. There is **no recovery path**: lose the passphrase and the
+  store cannot be decrypted by anyone, so back the passphrase up independently.
 
 The factories gate the optional import: `keyring_backend()` / `encrypted_backend()` raise a
 `MissingExtraError` (with a `pip install credbox[…]` hint) when the extra is not installed.
