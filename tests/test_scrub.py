@@ -164,6 +164,23 @@ def test_scrub_exception_walks_context_chain():
         assert "sk-secret" not in str(err.__context__)
 
 
+def test_scrub_accepts_a_bare_string_as_one_secret_not_a_char_iterable():
+    # A single secret passed directly (scrub_secrets(log, "apikey")) must be treated as ONE secret,
+    # never iterated into characters -- otherwise it would redact every letter and shred the log
+    # while missing the actual secret.
+    out = scrub_secrets("login apikey ok, id=7", "apikey")
+    assert out == f"login {REDACTION} ok, id=7"
+    err = ValueError("token apikey rejected")
+    scrub_exception(err, "apikey")
+    assert "apikey" not in str(err) and REDACTION in str(err)
+
+
+def test_scrub_accepts_a_bare_secret_as_one_secret():
+    from credbox.secret import Secret
+
+    assert scrub_secrets("v=sk-xyz done", Secret("sk-xyz")) == f"v={REDACTION} done"
+
+
 def test_scrub_accepts_secret_values_and_redacts_them():
     # Passing a Secret (the natural thing, since Credentials hands back Secrets) must redact it --
     # not silently do nothing. Both entry points.

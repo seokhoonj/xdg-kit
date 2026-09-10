@@ -179,7 +179,10 @@ def _no_backend_error(app: str, name: str) -> NoKeyringError:
 def _keyring_operation_error(app: str, name: str) -> CredentialsError:
     """A content-free error for a present-but-erroring keyring (fail-closed), raised where no
     third-party exception is in flight so ``__cause__`` and ``__context__`` are both ``None``."""
-    return CredentialsError(f"keyring operation failed for {app}/{name}")
+    return CredentialsError(
+        f"keyring operation failed for {app}/{name}: the OS keyring is present but returned an "
+        f"error (check that the keyring/keychain service is running and unlocked)"
+    )
 
 
 # --- returning-frame keyring calls (the third-party exception dies here) --------

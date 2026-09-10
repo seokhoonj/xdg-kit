@@ -90,6 +90,11 @@ masked in `str`/`repr`, compares in constant time, and is unhashable, so it cann
 line or become a dict key by accident. `set` accepts a `str` or a `Secret`, refuses a blank value,
 and strips surrounding whitespace so a stored key matches what resolution returns.
 
+Two `Secret` footguns to know: using one where a string is expected — an f-string, a header value
+(`f"Bearer {secret}"`) — inserts the **mask**, not the key, and raises no error, so always
+`.reveal()` at the boundary; and `secret == "some-string"` is always `False` (equality compares
+only two `Secret`s), so compare with `secret.reveal() == other` or wrap the other side in `Secret`.
+
 The **shared store** is how a key common to several apps stops being duplicated: store it once
 under a shared app (say `"auth"`), and every consumer resolves it with `shared=["auth"]`. A key
 specific to one app stays in that app's own store.
@@ -111,9 +116,13 @@ credbox dirs myapp                      # print all five directories
 credbox doctor                          # check every app's credentials file/dir permissions
 ```
 
-`set`, `get`, `list`, and `unset` accept `--keyring` to operate on the OS keyring backend (with
-automatic file fallback). The CLI never prints a traceback: a runtime error becomes a one-line,
-content-free message on stderr. Exit codes: `0` success, `1` a command failure, `2` a usage error.
+`set` prompts (no echo) on a terminal; in a script or CI, pipe the value on stdin
+(`printf %s "$TOKEN" | credbox set myapp API_KEY`) — the argv-safe path, since unlike `--value`
+the secret never appears in the process argument list. `set`, `get`, `list`, and `unset` accept
+`--keyring` to use the OS keyring backend (requires `credbox[keyring]`; the file store is used when
+the keyring is unavailable at runtime). The CLI never prints a traceback: a runtime error becomes a
+one-line, content-free message on stderr. Exit codes: `0` success, `1` a command failure (including
+`doctor` finding a file/dir readable beyond its owner), `2` a usage error.
 
 ## 5. Backends
 
@@ -150,6 +159,18 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
 
 The factories gate the optional import: `keyring_backend()` / `encrypted_backend()` raise a
 `MissingExtraError` (with a `pip install credbox[…]` hint) when the extra is not installed.
+
+The `credbox` CLI manages the file and keyring stores only; **populate an encrypted store from
+code** with the same `Credentials`:
+
+```python
+from getpass import getpass
+from credbox import Credentials, Secret, encrypted_backend
+
+creds = Credentials("myapp", backend=encrypted_backend(passphrase=Secret(getpass("passphrase: "))))
+creds.set("API_KEY", value="sk-...")     # writes credentials.enc (encrypted)
+creds.require("API_KEY")                 # read it back with the same passphrase
+```
 
 ## 6. Git credential helper
 

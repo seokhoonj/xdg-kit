@@ -72,6 +72,11 @@ key.reveal()          # -> "sk-..."  HTTP 클라이언트에 넘길 실제 문�
 에서 마스킹되고, 비교는 상수 시간이며, 해시할 수 없어 로그 한 줄이나 dict 키에 실수로 끼지 않습니다.
 `set`은 `str`·`Secret`을 받고, 빈 값을 거부하며, 앞뒤 공백을 떼어 저장값과 조회값이 어긋나지 않게 합니다.
 
+`Secret` 함정 두 가지: 문자열이 필요한 자리(f-string, 헤더 값 `f"Bearer {secret}"`)에 그대로 쓰면
+실제 키가 아니라 **마스크**가 들어가고 오류도 안 나므로 경계에서 반드시 `.reveal()` 하세요. 그리고
+`secret == "문자열"`은 항상 `False`입니다(동등 비교는 `Secret`끼리만) — `secret.reveal() == other`로
+비교하거나 상대를 `Secret(...)`으로 감싸세요.
+
 **공유 저장소**는 여러 앱이 함께 쓰는 키를 한 번만 두는 방법입니다 — 공유 앱(예: `"auth"`)에 저장하고, 각
 앱이 `shared=["auth"]`로 함께 읽습니다. 한 앱에만 필요한 키는 그 앱 저장소에 둡니다.
 
@@ -92,9 +97,12 @@ credbox dirs myapp                      # 디렉터리 다섯 개
 credbox doctor                          # 모든 앱의 권한 점검
 ```
 
-`set`·`get`·`list`·`unset`에 `--keyring`을 붙이면 OS 키링 백엔드(파일 자동 폴백)를 씁니다. CLI는
-트레이스백을 찍지 않고, 오류는 stderr에 값 없는 한 줄로 냅니다. 종료 코드는 성공 `0`, 명령 실패 `1`,
-사용법 오류 `2`.
+`set`은 터미널에선 (에코 없이) 입력받고, 스크립트·CI에선 값을 stdin으로 파이프하세요
+(`printf %s "$TOKEN" | credbox set myapp API_KEY`) — `--value`와 달리 시크릿이 프로세스 인자
+목록에 안 남는 argv-안전 경로입니다. `--keyring`을 붙이면 OS 키링 백엔드(`credbox[keyring]` 필요;
+런타임에 키링을 못 쓰면 파일 저장소 사용)를 씁니다. CLI는 트레이스백을 찍지 않고, 오류는 stderr에 값
+없는 한 줄로 냅니다. 종료 코드는 성공 `0`, 명령 실패 `1`(`doctor`가 소유자 외 접근 가능한 파일·디렉터리를
+찾은 경우 포함), 사용법 오류 `2`.
 
 ## 5. 백엔드
 
@@ -124,6 +132,17 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암�
 
 팩토리가 선택 import를 걸러 줍니다: extra가 없으면 `keyring_backend()`·`encrypted_backend()`는
 `MissingExtraError`와 `pip install credbox[…]` 안내를 냅니다.
+
+`credbox` CLI는 파일·키링 저장소만 다룹니다 — **암호화 저장소는 코드에서** 같은 `Credentials`로 채웁니다:
+
+```python
+from getpass import getpass
+from credbox import Credentials, Secret, encrypted_backend
+
+creds = Credentials("myapp", backend=encrypted_backend(passphrase=Secret(getpass("passphrase: "))))
+creds.set("API_KEY", value="sk-...")     # credentials.enc(암호화)에 씀
+creds.require("API_KEY")                 # 같은 passphrase로 다시 읽음
+```
 
 ## 6. git 자격증명 헬퍼
 

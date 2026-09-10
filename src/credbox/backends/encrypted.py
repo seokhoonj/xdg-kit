@@ -131,20 +131,20 @@ class EncryptedFileBackend:
             # their passphrase. (The header is pre-tag-check, so someone with write access could
             # choose this message, but both outcomes are content-free -- no secret either way.)
             raise CredentialsError(
-                f"the store for {app} was written by a newer credbox; upgrade credbox to read it"
+                f"the store {path} was written by a newer credbox; upgrade credbox to read it"
             )
         if not isinstance(outcome, bytes):
             # Wrong passphrase, tampering, or a relocated blob (its bound app did not match). Raised
             # where no crypto exception is in flight (it died inside _try_decrypt), so
             # DecryptionError has __cause__ AND __context__ None.
             raise DecryptionError(
-                f"could not decrypt the store for {app}: wrong passphrase or tampering"
+                f"could not decrypt {path}: wrong passphrase or tampering"
             )
         plaintext = outcome
         result = parse_store(plaintext)
         del plaintext
         if isinstance(result, StoreFault):
-            raise CredentialsError(f"the decrypted store for {app} is malformed")
+            raise CredentialsError(f"the decrypted store {path} is malformed")
         return result
 
     def _save(self, app: str, store: dict[str, str]) -> None:

@@ -4,6 +4,8 @@ traceback."""
 
 from __future__ import annotations
 
+import io
+
 import pytest
 
 from credbox.backends.file import FileBackend
@@ -11,6 +13,13 @@ from credbox.cli import main
 from credbox.secret import mask_secret
 
 SECRET = "sk_live_0123456789abcdef"
+
+
+class _Tty(io.StringIO):
+    """A stdin stand-in that reports as an interactive terminal (so `set` prompts via getpass)."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 def test_set_then_masked_get(capsys: pytest.CaptureFixture[str]) -> None:
@@ -118,10 +127,17 @@ def test_doctor_warns_on_a_group_readable_credentials_file(
     capsys.readouterr()
     path = FileBackend().path("myapp")
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)   # 0640: group-readable
-    assert main(["doctor", "myapp"]) == 0
+    assert main(["doctor", "myapp"]) == 1   # insecure found -> nonzero, so CI can gate on it
     captured = capsys.readouterr()
     assert "chmod 600" in captured.err
     assert "checked 1" in captured.out
+
+
+def test_doctor_all_secure_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["set", "myapp", "k", "--value", "v"])   # written 0600 in a 0700 dir
+    capsys.readouterr()
+    assert main(["doctor", "myapp"]) == 0
+    assert "checked 1" in capsys.readouterr().out
 
 
 def test_doctor_with_no_apps_reports_zero(capsys: pytest.CaptureFixture[str]) -> None:
@@ -137,20 +153,31 @@ def test_get_resolve_consults_the_environment(
     assert capsys.readouterr().out.strip() == "from-the-environment"
 
 
-def test_set_without_value_on_noninteractive_stdin_is_a_usage_error(
+def test_set_reads_the_value_from_a_pipe_when_stdin_is_not_a_tty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def _raise_eof(_prompt: str) -> str:
-        raise EOFError
+    # The argv-safe scripted path: a non-TTY stdin supplies the value directly (no --value, so the
+    # secret never lands in the process argument list), without any getpass echo warning.
+    monkeypatch.setattr("sys.stdin", io.StringIO("sk-piped-value\n"))   # a plain StringIO isatty()==False
+    assert main(["set", "myapp", "k"]) == 0
+    capsys.readouterr()
+    assert main(["get", "myapp", "k", "--reveal"]) == 0
+    assert capsys.readouterr().out.strip() == "sk-piped-value"
 
-    monkeypatch.setattr("credbox.cli.getpass.getpass", _raise_eof)
+
+def test_set_without_value_and_empty_noninteractive_stdin_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))   # non-TTY, nothing to read
     assert main(["set", "myapp", "k"]) == 2
-    assert "stdin is not interactive" in capsys.readouterr().err
+    assert "no value on stdin" in capsys.readouterr().err
 
 
 def test_keyboard_interrupt_at_prompt_exits_130_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setattr("sys.stdin", _Tty())   # force the interactive prompt path
+
     def _interrupt(_prompt: str) -> str:
         raise KeyboardInterrupt
 
@@ -166,6 +193,8 @@ def test_unexpected_exception_is_content_free_not_a_traceback(
 ) -> None:
     # An unexpected failure must be caught by the terminal guard: exit 1, a content-free stderr
     # line, and no traceback (a prompted `value` local must not reach a locals-dumping excepthook).
+    monkeypatch.setattr("sys.stdin", _Tty())   # force the interactive prompt path
+
     def _boom(_prompt: str) -> str:
         raise RuntimeError("unexpected failure carrying sk_live_0123456789abcdef")
 

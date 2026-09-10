@@ -132,7 +132,7 @@ def _fault_error(path: Path, fault: StoreFault) -> CredentialsError:
     elif kind is StoreFaultKind.NOT_OBJECT:
         detail = "not a JSON object of name to value"
     elif kind is StoreFaultKind.NOT_STRING_VALUE:
-        detail = "a stored value is not a string"
+        detail = "a JSON object with a non-string value"
     else:
         detail = "malformed"
     return CredentialsError(f"{path} is {detail}")
