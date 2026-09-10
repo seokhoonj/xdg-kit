@@ -18,6 +18,7 @@ import contextlib
 import errno
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from credbox.errors import CredBoxError
@@ -26,6 +27,13 @@ __all__ = [
     "write_bytes_atomic",
     "write_text_atomic",
 ]
+
+# Windows os.replace fails with PermissionError while another process has the target open (the CRT
+# opens without FILE_SHARE_DELETE); readers deliberately hold no lock, so a get() overlapping a
+# write() would otherwise spuriously fail the write. Retry a few times with a short backoff there.
+# On POSIX, rename over an open file is fine, so no retry runs (the loop body succeeds first try).
+_REPLACE_RETRIES = 10
+_REPLACE_BACKOFF_SECONDS = 0.02
 
 # errnos meaning "this platform/filesystem cannot fsync a directory" -- only these are
 # ignored. Real durability failures (EIO, ENOSPC) are not here, so they propagate rather
@@ -69,7 +77,7 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = 0o600) -> None:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())   # durable before the rename
-            os.replace(temp_path, path)
+            _replace(temp_path, path)
             _fsync_dir(path.parent)         # make the rename itself durable
         except BaseException:
             # Catch BaseException, not just OSError: a KeyboardInterrupt (Ctrl-C at the no-echo
@@ -98,6 +106,23 @@ def write_text_atomic(path: Path, text: str, *, mode: int = 0o600) -> None:
             distinction on the target's state).
     """
     write_bytes_atomic(path, text.encode("utf-8"), mode=mode)
+
+
+def _replace(temp_path: Path, path: Path) -> None:
+    """``os.replace`` (atomic on both POSIX and Windows), retrying on Windows only when the target
+    is momentarily held open by a concurrent reader (``PermissionError``). On POSIX the first call
+    succeeds -- rename over an open file is fine -- so no retry runs. The final attempt is outside
+    the retry guard, so a persistent failure still raises."""
+    if _IS_POSIX:
+        os.replace(temp_path, path)
+        return
+    for _attempt in range(_REPLACE_RETRIES):
+        try:
+            os.replace(temp_path, path)
+            return
+        except PermissionError:
+            time.sleep(_REPLACE_BACKOFF_SECONDS)   # a reader has the target open; let it close
+    os.replace(temp_path, path)   # last try: raise if it is still held
 
 
 def _fsync_dir(directory: Path) -> None:

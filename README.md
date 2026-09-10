@@ -185,7 +185,9 @@ The app name is validated as a single path segment, so a crafted name can never 
 `data_dir` and `state_dir` honour a per-app `<PREFIX>_DATA_DIR` / `<PREFIX>_STATE_DIR` override (an
 absolute path used as-is), where `<PREFIX>` is `env_var_prefix(app)`. By default paths use the XDG
 `~/.config` layout on every OS; pass `layout="native"` for OS-native locations (Linux `~/.config`,
-macOS `~/Library/Application Support`, Windows `%LOCALAPPDATA%`), or set `CREDBOX_LAYOUT`.
+macOS `~/Library/Application Support`, Windows `%LOCALAPPDATA%`), or set `CREDBOX_LAYOUT`. The
+layout selects **where the store lives**, so switching it points at a different location — it is
+not a migration; move an existing store yourself (e.g. with `relocate_once`) if you change it.
 
 **Windows note:** the 0600/0700 mode bits are POSIX-only. On Windows there is no such mode; credbox
 relies on the per-user `%LOCALAPPDATA%` ACL, and does not claim a mode guarantee it cannot deliver
@@ -204,9 +206,10 @@ scrub_secrets("failed with sk-abc123", [key])   # "failed with ***"
 raise scrub_exception(err, [key])               # scrubs the whole __cause__/__context__ chain
 ```
 
-`scrub_exception` never raises and rewrites each exception's `args`, its transport URLs (`url`,
-`request.url`, `response.url`), and its PEP 678 `__notes__`. For an exception with a custom
-`__str__`, also pass the rendered log line through `scrub_secrets`.
+Both helpers take the secret values to redact as either raw `str`s or `Secret`s — here `key` is a
+`Secret` and is redacted as shown. `scrub_exception` never raises and rewrites each exception's
+`args`, its transport URLs (`url`, `request.url`, `response.url`), and its PEP 678 `__notes__`. For
+an exception with a custom `__str__`, also pass the rendered log line through `scrub_secrets`.
 
 ## 9. Single-instance locking
 

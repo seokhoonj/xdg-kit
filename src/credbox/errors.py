@@ -51,10 +51,11 @@ class InvalidAppNameError(CredBoxError, ValueError):
 
 
 class BlankSecretError(CredBoxError, ValueError):
-    """A secret value passed to ``Credentials.set`` is blank or whitespace-only. A blank would
-    list under ``names`` yet resolve to ``None`` (blanks read as absent), so it is refused to keep
-    ``set`` and ``get`` consistent. Also a ``ValueError`` -- a blank is a caller mistake -- so an
-    ``except ValueError`` catches it too, mirroring ``InvalidAppNameError``."""
+    """A blank or whitespace-only secret name or value was passed to ``Credentials.set``. A blank
+    value would list under ``names`` yet resolve to ``None`` (blanks read as absent); a blank name
+    is unresolvable -- both are refused to keep ``set`` and ``get`` consistent. Also a
+    ``ValueError`` -- a blank is a caller mistake -- so an ``except ValueError`` catches it too,
+    mirroring ``InvalidAppNameError``."""
 
 
 class DecryptionError(CredBoxError):

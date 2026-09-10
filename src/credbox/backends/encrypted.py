@@ -122,14 +122,25 @@ class EncryptedFileBackend:
             return {}
         except OSError as err:
             raise CredentialsError(f"could not read {path}: {err}") from err
-        plaintext = _try_decrypt(blob, self._passphrase.reveal())
+        outcome = _try_decrypt(blob, self._passphrase.reveal(), app)
         del blob
-        if plaintext is None:
-            # Wrong passphrase or tampering. Raised where no crypto exception is in flight (it
-            # died inside _try_decrypt), so DecryptionError has __cause__ AND __context__ None.
+        if outcome is _NEWER_VERSION:
+            # A well-formed argon2id header carrying an unrecognized newer version -- written by a
+            # newer credbox. Report that distinctly (content-free) instead of misdiagnosing it as a
+            # wrong passphrase or tampering, so the user is told to upgrade rather than doubting
+            # their passphrase. (The header is pre-tag-check, so someone with write access could
+            # choose this message, but both outcomes are content-free -- no secret either way.)
+            raise CredentialsError(
+                f"the store for {app} was written by a newer credbox; upgrade credbox to read it"
+            )
+        if not isinstance(outcome, bytes):
+            # Wrong passphrase, tampering, or a relocated blob (its bound app did not match). Raised
+            # where no crypto exception is in flight (it died inside _try_decrypt), so
+            # DecryptionError has __cause__ AND __context__ None.
             raise DecryptionError(
                 f"could not decrypt the store for {app}: wrong passphrase or tampering"
             )
+        plaintext = outcome
         result = parse_store(plaintext)
         del plaintext
         if isinstance(result, StoreFault):
@@ -142,7 +153,7 @@ class EncryptedFileBackend:
         encoded = serialize_store(store)
         if isinstance(encoded, StoreFault):
             raise CredentialsError(f"{path} could not be serialized: a value is not encodable")
-        blob = _encrypt(encoded, self._passphrase.reveal())
+        blob = _encrypt(encoded, self._passphrase.reveal(), app)
         try:
             write_bytes_atomic(path, blob, mode=PRIVATE_FILE_MODE)
         except CredBoxError as err:
@@ -150,6 +161,10 @@ class EncryptedFileBackend:
 
 
 # --- crypto primitives ---------------------------------------------------------
+
+# Sentinel returned by _try_decrypt for a well-formed header whose version this build does not
+# understand -- distinct from None (a decrypt failure) so the caller reports "upgrade credbox".
+_NEWER_VERSION: object = object()
 
 _kdf_available = False
 _kdf_probe_lock = threading.Lock()
@@ -206,8 +221,10 @@ def _derive_key(passphrase: str, salt: bytes, *, time_cost: int, memory_cost: in
         ) from None
 
 
-def _encrypt(plaintext: bytes, passphrase: str) -> bytes:
-    """Encrypt ``plaintext`` into the single-blob layout with a fresh salt and nonce."""
+def _encrypt(plaintext: bytes, passphrase: str, app: str) -> bytes:
+    """Encrypt ``plaintext`` into the single-blob layout with a fresh salt and nonce. ``app`` is
+    written into the header (and thus bound as AAD) so a reader can confirm the blob belongs to
+    the store it was found in -- see ``_try_decrypt``."""
     salt = os.urandom(_SALT_LEN)
     key = _derive_key(
         passphrase, salt,
@@ -220,6 +237,7 @@ def _encrypt(plaintext: bytes, passphrase: str) -> bytes:
         "m": _WRITE_MEMORY_COST_KIB,
         "p": _WRITE_LANES,
         "hlen": _KEY_LEN,
+        "app": app,
         "salt": base64.b64encode(salt).decode("ascii"),
     }
     header_json = json.dumps(header, sort_keys=True).encode("utf-8")
@@ -228,11 +246,13 @@ def _encrypt(plaintext: bytes, passphrase: str) -> bytes:
     return len(header_json).to_bytes(4, "big") + header_json + nonce + ciphertext
 
 
-def _try_decrypt(blob: bytes, passphrase: str) -> bytes | None:
+def _try_decrypt(blob: bytes, passphrase: str, app: str) -> bytes | None | object:
     """Parse the blob, re-derive the key from the header's own (clamped) params, and AES-GCM
-    decrypt with the header bound as AAD. Return the plaintext bytes, or ``None`` on ANY failure
-    (a malformed blob, wrong passphrase, or tampering). Every crypto/decode exception is caught
-    HERE and never escapes, so the caller's ``DecryptionError`` has ``__context__`` ``None``."""
+    decrypt with the header bound as AAD. Return the plaintext bytes; ``None`` on any decrypt
+    failure (a malformed blob, wrong passphrase, tampering, or a blob bound to a different app);
+    or the ``_NEWER_VERSION`` sentinel for a well-formed header whose version is newer than this
+    build understands. Every crypto/decode exception is caught HERE and never escapes, so the
+    caller's ``DecryptionError`` has ``__context__`` ``None``."""
     try:
         header_len = int.from_bytes(blob[:4], "big")
         header_json = blob[4:4 + header_len]
@@ -242,16 +262,28 @@ def _try_decrypt(blob: bytes, passphrase: str) -> bytes | None:
         if len(header_json) != header_len or len(nonce) != _NONCE_LEN:
             return None
         header = json.loads(header_json)
-        if not isinstance(header, dict):
+        if not isinstance(header, dict) or header.get("kdf") != "argon2id":
             return None
-        if header.get("v") != 1 or header.get("kdf") != "argon2id":
-            return None
+        version = header.get("v")
+        if version != 1:
+            # A well-formed argon2id header with a recognizably-newer integer version was written
+            # by a newer credbox; signal that distinctly. Anything else (v absent, non-int, <1) is
+            # malformed and falls through to a normal decrypt failure.
+            return _NEWER_VERSION if isinstance(version, int) and version > 1 else None
         salt = base64.b64decode(header["salt"])
         time_cost = _clamp(int(header["t"]), 1, _MAX_TIME_COST)
         memory_cost = _clamp(int(header["m"]), 8 * _MAX_LANES, _MAX_MEMORY_COST_KIB)
         lanes = _clamp(int(header["p"]), 1, _MAX_LANES)
         key = _derive_key(passphrase, salt, time_cost=time_cost, memory_cost=memory_cost, lanes=lanes)
-        return AESGCM(key).decrypt(nonce, ciphertext, header_json)
+        plaintext = AESGCM(key).decrypt(nonce, ciphertext, header_json)
+        # App binding: a v1 blob carries its app in the (AAD-authenticated) header. A blob moved
+        # from another same-passphrase store decrypts (its own header is the AAD) but its app will
+        # not match -- reject it as tampering. A blob without the field (a hypothetical older one)
+        # skips the check, so the binding is additive and back-compatible.
+        stored_app = header.get("app")
+        if stored_app is not None and stored_app != app:
+            return None
+        return plaintext
     except (InvalidTag, ValueError, KeyError, TypeError, RecursionError, OverflowError,
             json.JSONDecodeError, UnicodeDecodeError):
         # Every way a tampered/garbage header can fault maps to None here, so nothing escapes with

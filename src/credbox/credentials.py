@@ -117,13 +117,16 @@ class Credentials:
         survives a read).
 
         Raises:
-            BlankSecretError: ``value`` is empty or whitespace-only -- a blank would list under
-                ``names`` yet resolve to ``None``, so it is refused to keep set and get consistent.
-                A subclass of both ``CredBoxError`` and ``ValueError``.
+            BlankSecretError: ``name`` or ``value`` is empty or whitespace-only. A blank value
+                would list under ``names`` yet resolve to ``None``; a blank name is unresolvable --
+                both are refused to keep set and get consistent. A subclass of both ``CredBoxError``
+                and ``ValueError``.
             CredentialsError: the store could not be written.
             DecryptionError: with an encrypted backend, the existing store had to be read to
                 merge the new value and could not be decrypted (a wrong passphrase or tampering).
         """
+        if not name or not name.strip():
+            raise BlankSecretError("refusing to store under a blank name")
         raw = value.reveal() if isinstance(value, Secret) else value
         raw = raw.strip()
         if not raw:

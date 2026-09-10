@@ -66,6 +66,15 @@ def test_set_refuses_a_blank_value() -> None:
         Credentials("myapp").set("k", value="   ")
 
 
+def test_set_refuses_a_blank_name() -> None:
+    from credbox.errors import BlankSecretError
+
+    with pytest.raises(BlankSecretError):
+        Credentials("myapp").set("", value="v")
+    with pytest.raises(BlankSecretError):
+        Credentials("myapp").set("   ", value="v")
+
+
 def test_blank_secret_error_is_both_credbox_and_value_error() -> None:
     # Rooted in the CredBoxError family (so `except CredBoxError` catches it) and still a
     # ValueError (a blank is a caller mistake), mirroring InvalidAppNameError.
