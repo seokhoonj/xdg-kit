@@ -50,6 +50,18 @@ def test_invalid_app_name_is_also_a_value_error() -> None:
         app_dir_segment("a/b")
 
 
+@pytest.mark.parametrize("reserved", ["con", "CON", "nul", "Nul", "com1", "lpt9", "aux", "prn", "con.txt"])
+def test_app_dir_segment_rejects_windows_reserved_names(reserved: str) -> None:
+    # Rejected on every platform so a store stays portable -- these are unusable on Windows.
+    with pytest.raises(InvalidAppNameError):
+        app_dir_segment(reserved)
+
+
+def test_app_dir_segment_allows_names_that_merely_contain_a_reserved_word() -> None:
+    for ok in ("console", "connection", "com10", "aux-service", "prnt"):
+        assert app_dir_segment(ok) == ok
+
+
 # --- xdg layout ----------------------------------------------------------------
 
 def test_config_dir_uses_xdg_config_home(

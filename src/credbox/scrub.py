@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from urllib.parse import quote, quote_plus
 
+from credbox.secret import Secret
+
 __all__ = [
     "scrub_secrets",
     "scrub_exception",
@@ -29,15 +31,17 @@ __all__ = [
 REDACTION = "***"
 
 
-def scrub_secrets(text: str, secrets: Iterable[str]) -> str:
+def scrub_secrets(text: str, secrets: Iterable[str | Secret]) -> str:
     """Return ``text`` with every non-empty value in ``secrets`` -- and each value's
     URL-encoded (``quote`` / ``quote_plus``) forms -- replaced by ``***``.
 
-    Longer targets are replaced first, so a secret that is a prefix of another (or of its own
-    encoded form) does not leave a tail exposed. Best-effort and never raises: a non-iterable
-    ``secrets`` leaves ``text`` unchanged."""
+    ``secrets`` may be raw ``str`` values or ``Secret``s (the natural thing to pass -- a
+    ``Secret`` is revealed here, at the point of use, purely to redact it; passing one is NOT a
+    silent no-op). Longer targets are replaced first, so a secret that is a prefix of another (or
+    of its own encoded form) does not leave a tail exposed. Best-effort and never raises: a
+    non-iterable ``secrets`` leaves ``text`` unchanged."""
     try:
-        secret_values = [value for value in secrets if isinstance(value, str) and value]
+        secret_values = _redactable_values(secrets)
     except MemoryError:
         raise   # never swallow OOM into a return of the still-unscrubbed text (see module docstring)
     except Exception:
@@ -46,7 +50,7 @@ def scrub_secrets(text: str, secrets: Iterable[str]) -> str:
     return _replace_targets(text, _redaction_targets(secret_values))
 
 
-def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException:
+def scrub_exception(err: BaseException, secrets: Iterable[str | Secret]) -> BaseException:
     """Scrub every secret in ``secrets`` from ``err`` and its ``__cause__`` / ``__context__``
     chain, in place, and return ``err``. Best-effort: any failure while inspecting a node is
     swallowed, so this never raises on the error path.
@@ -60,7 +64,7 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
     before emitting it. The redaction targets are computed once here and threaded through the
     walk rather than rebuilt per field."""
     try:
-        secret_values = [value for value in secrets if isinstance(value, str) and value]
+        secret_values = _redactable_values(secrets)
     except MemoryError:
         raise   # never swallow OOM into a return of the still-unscrubbed error (see module docstring)
     except Exception:
@@ -89,6 +93,19 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
             # module exists to scrub -- so walk them too (the `seen` set guards against cycles).
             stack.extend(node.exceptions)
     return err
+
+
+def _redactable_values(secrets: Iterable[str | Secret]) -> list[str]:
+    """The non-empty raw strings to redact, drawn from an iterable of ``str`` and/or ``Secret``.
+    A ``Secret`` is revealed here -- the point of use for redaction -- so passing one (the natural
+    call, since ``Credentials`` hands back ``Secret``s) redacts it instead of silently doing
+    nothing. Any other type is skipped."""
+    values: list[str] = []
+    for item in secrets:
+        raw = item.reveal() if isinstance(item, Secret) else item
+        if isinstance(raw, str) and raw:
+            values.append(raw)
+    return values
 
 
 def _redaction_targets(secret_values: list[str]) -> list[str]:

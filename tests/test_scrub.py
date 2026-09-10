@@ -162,3 +162,15 @@ def test_scrub_exception_walks_context_chain():
         assert err.__context__ is not None
         assert "sk-secret" not in str(err)
         assert "sk-secret" not in str(err.__context__)
+
+
+def test_scrub_accepts_secret_values_and_redacts_them():
+    # Passing a Secret (the natural thing, since Credentials hands back Secrets) must redact it --
+    # not silently do nothing. Both entry points.
+    from credbox.secret import Secret
+
+    assert scrub_secrets("failed with sk-abc123", [Secret("sk-abc123")]) == f"failed with {REDACTION}"
+    err = ValueError("token sk-abc123 rejected")
+    scrub_exception(err, [Secret("sk-abc123")])
+    assert "sk-abc123" not in str(err)
+    assert REDACTION in str(err)

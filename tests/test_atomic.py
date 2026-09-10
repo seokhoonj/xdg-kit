@@ -150,6 +150,45 @@ def test_write_body_failure_cleans_up_temp(tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+def test_replace_retries_a_transient_permission_error_off_posix(tmp_path, monkeypatch):
+    # Simulate Windows: os.replace fails with PermissionError while a reader holds the target open,
+    # then succeeds. The write must retry (not fail) so a concurrent read+write does not spuriously
+    # break the writer. _IS_POSIX is flipped so the retry branch runs on this Linux box.
+    import credbox.atomic as atomic
+
+    monkeypatch.setattr(atomic, "_IS_POSIX", False)
+    monkeypatch.setattr("credbox.atomic.time.sleep", lambda _s: None)   # no real backoff in the test
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError("target is open by another process")
+        real_replace(src, dst)
+
+    monkeypatch.setattr("credbox.atomic.os.replace", flaky_replace)
+    write_bytes_atomic(tmp_path / "f", b"data")
+    assert calls["n"] == 3
+    assert (tmp_path / "f").read_bytes() == b"data"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_replace_gives_up_and_raises_on_persistent_permission_error_off_posix(tmp_path, monkeypatch):
+    import credbox.atomic as atomic
+
+    monkeypatch.setattr(atomic, "_IS_POSIX", False)
+    monkeypatch.setattr("credbox.atomic.time.sleep", lambda _s: None)
+
+    def always_denied(src, dst):
+        raise PermissionError("target stays open")
+
+    monkeypatch.setattr("credbox.atomic.os.replace", always_denied)
+    with pytest.raises(CredBoxError):
+        write_bytes_atomic(tmp_path / "f", b"data")
+    assert list(tmp_path.glob("*.tmp")) == []   # temp cleaned up on the final failure
+
+
 def test_non_oserror_mid_write_still_cleans_up_temp(tmp_path, monkeypatch):
     # A KeyboardInterrupt/MemoryError raised mid-write (not an OSError) must still remove the
     # secret-bearing temp file -- otherwise a Ctrl-C at the write leaves the plaintext on disk.

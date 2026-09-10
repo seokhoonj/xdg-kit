@@ -219,6 +219,42 @@ def test_internal_error_at_real_derive_params_fails_closed_content_free(
     assert PASSPHRASE.reveal() not in str(excinfo.value)
 
 
+def test_newer_version_blob_reports_upgrade_not_tampering() -> None:
+    # A well-formed argon2id header with a version this build does not understand (a future v2)
+    # must report "upgrade credbox" (CredentialsError), not misdiagnose as wrong-passphrase/
+    # tampering (DecryptionError). The version check is before the tag check, so bumping v in an
+    # otherwise-valid header exercises it.
+    from credbox.errors import CredentialsError
+
+    backend = _backend()
+    backend.set("myapp", "api_key", value=SECRET)
+    path = backend.path("myapp")
+    blob = path.read_bytes()
+    header_len = int.from_bytes(blob[:_HEADER_LEN_BYTES], "big")
+    header = json.loads(blob[_HEADER_LEN_BYTES:_HEADER_LEN_BYTES + header_len])
+    rest = blob[_HEADER_LEN_BYTES + header_len:]
+    header["v"] = 2
+    new_header = json.dumps(header, sort_keys=True).encode("utf-8")
+    path.write_bytes(len(new_header).to_bytes(_HEADER_LEN_BYTES, "big") + new_header + rest)
+    with pytest.raises(CredentialsError) as excinfo:
+        _backend().get("myapp", "api_key")
+    assert not isinstance(excinfo.value, DecryptionError)
+    assert "upgrade" in str(excinfo.value).lower()
+
+
+def test_blob_relocated_from_another_app_fails_closed() -> None:
+    # The header binds the app (as AAD). A blob moved from another same-passphrase store decrypts
+    # against its own header but its bound app will not match the store it now sits in, so it is
+    # rejected rather than silently serving the other app's secrets.
+    _backend().set("appA", "api_key", value=SECRET)
+    stolen = EncryptedFileBackend(passphrase=PASSPHRASE).path("appA").read_bytes()
+    victim_path = EncryptedFileBackend(passphrase=PASSPHRASE).path("appB")
+    victim_path.parent.mkdir(parents=True, exist_ok=True)
+    victim_path.write_bytes(stolen)
+    with pytest.raises(DecryptionError):
+        _backend().get("appB", "api_key")
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")

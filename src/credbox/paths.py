@@ -47,6 +47,12 @@ __all__ = [
 
 _APP_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 
+# Windows reserved DOS device names: unusable as a directory/file even with an extension (con.txt
+# still resolves to the device). They pass the charset rule above, so reject them on EVERY platform
+# -- a store must be portable, and a name that breaks only on Windows is a latent, hard-to-diagnose
+# footgun. Matched case-insensitively, with or without an extension.
+_WINDOWS_RESERVED = re.compile(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?")
+
 # Each kind's XDG variable and home-relative default.
 _XDG = {
     "config": ("XDG_CONFIG_HOME", ".config"),
@@ -65,7 +71,8 @@ def app_dir_segment(app: str) -> str:
     A valid name starts and ends with a letter or digit and contains only letters, digits,
     ``.``, ``_``, and ``-`` between (``"my-app"``, ``"a.b_c"``). This rejects an empty name, a
     path separator, ``.``/``..``, and leading/trailing punctuation, so a directory resolver
-    can never be steered out of its base by a crafted name.
+    can never be steered out of its base by a crafted name. A Windows reserved device name
+    (``con``, ``nul``, ``com1`` ...) is also rejected on every platform, so a store stays portable.
 
     Raises:
         InvalidAppNameError: ``app`` is not a valid directory segment (a caller mistake; also
@@ -75,6 +82,10 @@ def app_dir_segment(app: str) -> str:
         raise InvalidAppNameError(
             f"invalid app name {app!r}: expected a single path segment of letters, digits, "
             f"'.', '_', '-' (e.g. 'my-app')"
+        )
+    if _WINDOWS_RESERVED.fullmatch(app):
+        raise InvalidAppNameError(
+            f"invalid app name {app!r}: it is a Windows reserved device name (con, nul, com1, ...)"
         )
     return app
 

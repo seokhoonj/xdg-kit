@@ -158,7 +158,8 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 소유자만 접근하
 `data_dir`·`state_dir`은 앱별 `<PREFIX>_DATA_DIR`·`<PREFIX>_STATE_DIR` 오버라이드(지정한 절대경로를 그대로
 사용)를 따르며, `<PREFIX>`는 `env_var_prefix(app)`가 만듭니다. 기본은 모든 OS에서 XDG `~/.config`이고,
 `layout="native"`를 주면 OS 네이티브(Linux `~/.config`, macOS `~/Library/Application Support`, Windows
-`%LOCALAPPDATA%`)를 쓰거나 `CREDBOX_LAYOUT`으로 지정합니다.
+`%LOCALAPPDATA%`)를 쓰거나 `CREDBOX_LAYOUT`으로 지정합니다. layout은 **저장 위치**를 정하므로, 바꾸면
+다른 위치를 가리킬 뿐 마이그레이션이 아닙니다 — 바꾸려면 기존 저장소를 직접 옮기세요(예: `relocate_once`).
 
 **Windows 참고:** 0600·0700 모드 비트는 POSIX 전용입니다. Windows엔 없어 credbox는 사용자별
 `%LOCALAPPDATA%` ACL에 기대며, 지킬 수 없는 모드를 보장하지 않습니다.
@@ -176,9 +177,10 @@ scrub_secrets("failed with sk-abc123", [key])   # "failed with ***"
 raise scrub_exception(err, [key])               # __cause__·__context__ 사슬 전체 마스킹
 ```
 
-`scrub_exception`은 예외를 내지 않으며, 각 예외의 `args`와 전송 URL(`url`·`request.url`·`response.url`),
-PEP 678 `__notes__`를 다시 씁니다. `__str__`을 따로 정의한 예외라면 만들어진 로그 줄도 `scrub_secrets`에
-한 번 통과시키세요.
+두 헬퍼가 받는 시크릿 값은 raw `str`이거나 `Secret`이면 됩니다 — 위 `key`는 `Secret`이고 그대로
+마스킹됩니다. `scrub_exception`은 예외를 내지 않으며, 각 예외의 `args`와 전송 URL(`url`·`request.url`·
+`response.url`), PEP 678 `__notes__`를 다시 씁니다. `__str__`을 따로 정의한 예외라면 만들어진 로그 줄도
+`scrub_secrets`에 한 번 통과시키세요.
 
 ## 9. 중복 실행 방지 (단일 인스턴스 잠금)
 
