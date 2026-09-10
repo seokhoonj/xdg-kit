@@ -76,15 +76,21 @@ class FileLock:
         return True
 
     def release(self) -> None:
-        """Release the lock and close its file. A no-op when not held."""
+        """Release the lock and close its file. A no-op when not held. Best-effort and never
+        raises: closing the handle frees the OS lock regardless, so a failing ``unlock`` (e.g.
+        ENOLCK on a degraded mount) is swallowed. State is cleared FIRST so it is always
+        consistent -- otherwise a later ``acquire`` would short-circuit on a stale
+        ``acquired=True`` and report "held" without re-taking the now-released OS lock."""
         handle = self._handle
+        self.acquired = False
+        self._handle = None
         if handle is not None:
             try:
                 unlock(handle)
+            except OSError:
+                pass   # best-effort: the handle close below frees the OS lock anyway
             finally:
                 handle.close()
-                self._handle = None
-        self.acquired = False
 
     def __enter__(self) -> FileLock:
         self.acquire()

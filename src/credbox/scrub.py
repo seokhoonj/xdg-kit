@@ -83,6 +83,11 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
                 raise   # never swallow OOM into skipping a chained node that still holds a secret
             except Exception:
                 pass   # a custom exception's attribute access may raise; never on the error path
+        if isinstance(node, BaseExceptionGroup):
+            # PEP 654: a group's members live in `.exceptions`, not on the cause/context chain.
+            # httpx/anyio raise these routinely, and each member's args/URLs are exactly what this
+            # module exists to scrub -- so walk them too (the `seen` set guards against cycles).
+            stack.extend(node.exceptions)
     return err
 
 

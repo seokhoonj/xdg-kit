@@ -8,6 +8,12 @@ terminated by a blank line. The mapping is: the git ``host`` is the credbox ``ap
 The helper uses the plaintext file store (``default_backend()``); it does not consult the OS
 keyring, so a credential stored with ``credbox set --keyring`` is not served here.
 
+Two scope notes: the store is keyed by host only, so on a ``get`` for a plaintext ``http://``
+request the helper serves nothing (it cannot distinguish an http-stored from an https-stored
+value, and handing one to git over cleartext would be a downgrade). A host git sends with a port
+(``example.com:8443``) or as an IPv6 literal is encoded to a valid store segment, consistently
+across get/store/erase.
+
 Leak-surface discipline: on ``get`` the only thing written to stdout is the credential
 reply (``username=...\npassword=...``); on any error nothing is written to stdout (git treats an
 empty reply as "no credential") and a content-free note goes to stderr -- never the secret, never
@@ -16,6 +22,8 @@ a traceback.
 
 from __future__ import annotations
 
+import hashlib
+import re
 import sys
 from collections.abc import Sequence
 from typing import TextIO
@@ -47,14 +55,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         # any other operation: git ignores unknown helpers' output -- do nothing.
     except InvalidAppNameError:
         return 0   # the host does not map to a valid store name -> no credential, quietly
-    except Exception:
-        # Every failure -- our CredBoxError or any unexpected one -- is content-free here: nothing
-        # on stdout (git prompts), a generic note on stderr, never a secret and never a traceback.
+    except BaseException:
+        # Catch BaseException, not just Exception: a KeyboardInterrupt/SystemExit while reading
+        # stdin or handling the request would otherwise escape as a traceback, and `fields` holds
+        # the password on a `store`. Every failure is content-free here: nothing on stdout (git
+        # prompts), a generic note on stderr, never a secret and never a traceback.
         print("credbox: git-credential error", file=sys.stderr)
     return 0
 
 
 def _do_get(fields: dict[str, str]) -> None:
+    # Refuse to serve a stored credential for a plaintext-http request. credbox scopes a store by
+    # host only (not by protocol), so it cannot tell an http-stored value from an https-stored one;
+    # handing either to git over http risks a downgrade -- a secret saved for https:// leaking onto
+    # the wire in cleartext (a crafted http submodule URL or a redirect is enough). git's own store
+    # helper scopes by protocol for this reason; lacking that, the safe move is to not autofill http.
+    if fields.get("protocol") == "http":
+        return
     app = _app_of(fields)
     if app is None:
         return
@@ -98,16 +115,33 @@ def _do_erase(fields: dict[str, str]) -> None:
 
 
 def _app_of(fields: dict[str, str]) -> str | None:
-    """The credbox app for this request: the git ``host``, validated as a store segment. Returns
-    ``None`` when there is no host or it is not a usable segment (so ``get`` yields no credential
-    rather than erroring)."""
+    """The credbox app for this request, derived from the git ``host``. Returns ``None`` when
+    there is no host (so ``get`` yields no credential rather than erroring). A host git sends with
+    a port (``example.com:8443``) or as an IPv6 literal (``[::1]``) is not a valid store segment on
+    its own, so it is encoded to one -- see ``_host_to_segment``."""
     host = fields.get("host")
     if not host:
         return None
+    return _host_to_segment(host)
+
+
+def _host_to_segment(host: str) -> str | None:
+    """Map a git ``host`` (which per the protocol may include a port, and may be an IPv6 literal)
+    to a valid store segment. A host that is already a valid segment is used verbatim, so existing
+    stores and ``credbox set <host> ...`` keep working; anything else (a port's ``:``, IPv6
+    ``[]``/``:``) is sanitized and suffixed with a short hash of the raw host, so two distinct hosts
+    can never collide onto one store (which would cross-serve credentials)."""
     try:
         return app_dir_segment(host)
     except InvalidAppNameError:
-        return None
+        pass
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "-", host).strip("-._")
+    digest = hashlib.sha256(host.encode("utf-8")).hexdigest()[:12]
+    candidate = f"{sanitized}-{digest}" if sanitized else f"host-{digest}"
+    try:
+        return app_dir_segment(candidate)
+    except InvalidAppNameError:
+        return None   # unreachable for the candidate shape above, but fail closed if it ever isn't
 
 
 def _read_fields(stream: TextIO) -> dict[str, str]:

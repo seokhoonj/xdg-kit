@@ -117,3 +117,57 @@ def test_unexpected_exception_is_content_free_not_a_traceback(
     assert "ghp_secret123" not in out + err
     assert "Traceback" not in err
     assert err.strip() == "credbox: git-credential error"
+
+
+def test_keyboard_interrupt_during_store_is_content_free_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A KeyboardInterrupt (BaseException, not Exception) while handling a store -- where `fields`
+    # holds the password -- must be caught by the terminal guard, not escape as a traceback whose
+    # frame-locals could dump the password under a locals-printing excepthook.
+    import credbox.gitcredential as gc
+
+    def _interrupt(_fields: dict[str, str]) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(gc, "_do_store", _interrupt)
+    rc, out, err = _run(monkeypatch, capsys, "store", "host=github.com\nusername=alice\npassword=ghp_secret123\n\n")
+    assert rc == 0
+    assert out == ""
+    assert "ghp_secret123" not in out + err
+    assert "Traceback" not in err
+
+
+def test_get_refuses_to_serve_over_plaintext_http(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A credential stored (host-scoped) must not be handed out for a plaintext http request --
+    # credbox cannot tell an http-stored from an https-stored value, so serving over http risks a
+    # downgrade. https still serves.
+    Credentials("github.com").set("alice", value="ghp_secret123")
+    rc, out, _ = _run(monkeypatch, capsys, "get", "protocol=http\nhost=github.com\nusername=alice\n\n")
+    assert rc == 0
+    assert out == ""   # refused over http
+    rc, out, _ = _run(monkeypatch, capsys, "get", "protocol=https\nhost=github.com\nusername=alice\n\n")
+    assert "password=ghp_secret123" in out   # served over https
+
+
+def test_ported_host_round_trips(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # git sends host WITH the port (e.g. a self-hosted git on :8443); it is not a valid store
+    # segment on its own, so it is encoded -- but store then get must round-trip consistently.
+    stdin = "protocol=https\nhost=example.com:8443\nusername=alice\npassword=ghp_ported\n"
+    rc, out, err = _run(monkeypatch, capsys, "store", stdin + "\n")
+    assert rc == 0 and err == ""
+    rc, out, _ = _run(monkeypatch, capsys, "get", "protocol=https\nhost=example.com:8443\nusername=alice\n\n")
+    assert "password=ghp_ported" in out
+
+
+def test_distinct_ported_hosts_do_not_collide(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from credbox.gitcredential import _host_to_segment
+
+    assert _host_to_segment("example.com:8443") != _host_to_segment("example.com:9999")
+    assert _host_to_segment("github.com") == "github.com"   # a valid host is unchanged (back-compat)
