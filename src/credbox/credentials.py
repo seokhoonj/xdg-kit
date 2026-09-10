@@ -25,7 +25,7 @@ from collections.abc import Sequence
 
 from credbox.backends import SecretBackend, default_backend
 from credbox.environment import env_value
-from credbox.errors import CredentialsError
+from credbox.errors import BlankSecretError, CredentialsError
 from credbox.paths import app_dir_segment
 from credbox.secret import Secret
 
@@ -74,8 +74,9 @@ class Credentials:
         """
         if override is not None:
             raw = override.reveal() if isinstance(override, Secret) else override
-            if raw.strip():
-                return Secret(raw.strip())
+            cleaned = raw.strip()
+            if cleaned:
+                return Secret(cleaned)
         from_env = env_value(name)
         if from_env is not None:
             return Secret(from_env)
@@ -113,8 +114,9 @@ class Credentials:
         survives a read).
 
         Raises:
-            ValueError: ``value`` is empty or whitespace-only -- a blank would list under
+            BlankSecretError: ``value`` is empty or whitespace-only -- a blank would list under
                 ``names`` yet resolve to ``None``, so it is refused to keep set and get consistent.
+                A subclass of both ``CredBoxError`` and ``ValueError``.
             CredentialsError: the store could not be written.
             DecryptionError: with an encrypted backend, the existing store had to be read to
                 merge the new value and could not be decrypted (a wrong passphrase or tampering).
@@ -122,7 +124,7 @@ class Credentials:
         raw = value.reveal() if isinstance(value, Secret) else value
         raw = raw.strip()
         if not raw:
-            raise ValueError(f"refusing to store a blank value for {name!r}")
+            raise BlankSecretError(f"refusing to store a blank value for {name!r}")
         self._backend.set(self._app, name, value=raw)
 
     def unset(self, name: str) -> None:

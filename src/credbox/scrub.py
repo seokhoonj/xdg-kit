@@ -43,10 +43,7 @@ def scrub_secrets(text: str, secrets: Iterable[str]) -> str:
     except Exception:
         # a non-iterable or mid-iteration-raising `secrets` must not raise on the error path
         return text
-    result = text
-    for target in _redaction_targets(secret_values):
-        result = result.replace(target, REDACTION)
-    return result
+    return _replace_targets(text, _redaction_targets(secret_values))
 
 
 def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException:
@@ -54,11 +51,14 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
     chain, in place, and return ``err``. Best-effort: any failure while inspecting a node is
     swallowed, so this never raises on the error path.
 
-    Per node it rewrites ``args``, the transport URLs (``url``, ``request.url``,
-    ``response.url`` -- each ``getattr``-guarded, since httpx spells them as properties that
-    raise when unset), and ``__notes__`` (PEP 678). It does **not** guarantee ``str(err)`` is
-    clean for an exception with a custom ``__str__`` that renders something other than these,
-    so also pass the rendered log line through ``scrub_secrets`` before emitting it."""
+    Per node it rewrites ``args`` (recursing into ``str`` values nested in ``list``/``tuple``/
+    ``dict``/``set`` args, since ``str(err)`` renders those verbatim), the transport URLs
+    (``url``, ``request.url``, ``response.url`` -- each ``getattr``-guarded, since httpx spells
+    them as properties that raise when unset), and ``__notes__`` (PEP 678). It does **not**
+    guarantee ``str(err)`` is clean for an exception with a custom ``__str__`` that renders
+    something other than these, so also pass the rendered log line through ``scrub_secrets``
+    before emitting it. The redaction targets are computed once here and threaded through the
+    walk rather than rebuilt per field."""
     try:
         secret_values = [value for value in secrets if isinstance(value, str) and value]
     except MemoryError:
@@ -67,6 +67,7 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
         return err   # a non-iterable or raising `secrets` must not mask the original error
     if not secret_values:
         return err
+    targets = _redaction_targets(secret_values)
     seen: set[int] = set()
     stack: list[BaseException | None] = [err]
     while stack:
@@ -74,10 +75,12 @@ def scrub_exception(err: BaseException, secrets: Iterable[str]) -> BaseException
         if node is None or id(node) in seen:
             continue
         seen.add(id(node))
-        _scrub_node(node, secret_values)
+        _scrub_node(node, targets)
         for attr in ("__cause__", "__context__"):
             try:
                 stack.append(getattr(node, attr, None))
+            except MemoryError:
+                raise   # never swallow OOM into skipping a chained node that still holds a secret
             except Exception:
                 pass   # a custom exception's attribute access may raise; never on the error path
     return err
@@ -98,32 +101,60 @@ def _redaction_targets(secret_values: list[str]) -> list[str]:
     return sorted(targets, key=len, reverse=True)
 
 
-def _scrub_node(node: BaseException, secret_values: list[str]) -> None:
+def _replace_targets(text: str, targets: list[str]) -> str:
+    """Replace each prepared target in ``text`` with ``***`` (targets already deduped/ordered)."""
+    result = text
+    for target in targets:
+        result = result.replace(target, REDACTION)
+    return result
+
+
+def _scrub_value(value: object, targets: list[str]) -> object:
+    """Scrub ``str`` values anywhere inside ``value``, recursing through ``list``/``tuple``/
+    ``dict``/``set`` containers so a secret nested in a non-string exception arg (e.g.
+    ``ValueError([msg])``, whose ``str()`` renders the list verbatim) is redacted too. Any
+    other type is returned unchanged."""
+    if isinstance(value, str):
+        return _replace_targets(value, targets)
+    if isinstance(value, tuple):
+        return tuple(_scrub_value(v, targets) for v in value)
+    if isinstance(value, list):
+        return [_scrub_value(v, targets) for v in value]
+    if isinstance(value, dict):
+        return {_scrub_value(k, targets): _scrub_value(v, targets) for k, v in value.items()}
+    if isinstance(value, frozenset):
+        return frozenset(_scrub_value(v, targets) for v in value)
+    if isinstance(value, set):
+        return {_scrub_value(v, targets) for v in value}
+    return value
+
+
+def _scrub_node(node: BaseException, targets: list[str]) -> None:
     """Scrub ``node.args``, its transport URLs, and its ``__notes__``, each guarded
     independently so a property that raises cannot abort the walk."""
     try:
         args = node.args
         if args:
-            node.args = tuple(
-                scrub_secrets(arg, secret_values) if isinstance(arg, str) else arg for arg in args
-            )
+            node.args = tuple(_scrub_value(arg, targets) for arg in args)
     except MemoryError:
         raise   # never swallow OOM into leaving `args` unscrubbed on the node
     except Exception:
         pass   # a custom .args accessor may raise; the never-raise contract wins here
-    _scrub_url_attr(node, secret_values)
+    _scrub_url_attr(node, targets)
     for owner_name in ("request", "response"):
         try:
             owner = getattr(node, owner_name, None)
+        except MemoryError:
+            raise   # never swallow OOM into skipping an owner whose url still holds a secret
         except Exception:
             owner = None
         if owner is not None:
-            _scrub_url_attr(owner, secret_values)
+            _scrub_url_attr(owner, targets)
     try:
         notes = getattr(node, "__notes__", None)
         if isinstance(notes, list):
             node.__notes__ = [
-                scrub_secrets(note, secret_values) if isinstance(note, str) else note
+                _replace_targets(note, targets) if isinstance(note, str) else note
                 for note in notes
             ]
     except MemoryError:
@@ -132,17 +163,19 @@ def _scrub_node(node: BaseException, secret_values: list[str]) -> None:
         pass   # a custom __notes__ may not be assignable; never on the error path
 
 
-def _scrub_url_attr(obj: object, secret_values: list[str]) -> None:
+def _scrub_url_attr(obj: object, targets: list[str]) -> None:
     """Scrub a string ``url`` attribute on ``obj`` in place, fully guarded -- reading ``url``
     (an httpx property) can itself raise when unset, and a non-string ``url`` (an httpx URL
     object) is left alone."""
     try:
         url = getattr(obj, "url", None)
+    except MemoryError:
+        raise   # never swallow OOM into leaving the URL unscrubbed on the node
     except Exception:
         return   # a property that raises when unset
     if isinstance(url, str):
         try:
-            obj.url = scrub_secrets(url, secret_values)  # type: ignore[attr-defined]
+            obj.url = _replace_targets(url, targets)  # type: ignore[attr-defined]
         except MemoryError:
             raise   # never swallow OOM into leaving the URL unscrubbed on the node
         except Exception:

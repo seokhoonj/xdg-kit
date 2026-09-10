@@ -29,12 +29,14 @@ def relocate_once(old: Path, new: Path) -> bool:
             refuses to copy+unlink, which would briefly expose the secret at a second path;
             relocate within one filesystem instead. Also raised for any other move failure.
     """
-    if not old.exists():
-        return False
-    new.parent.mkdir(parents=True, exist_ok=True)
     try:
+        if not old.exists():
+            return False
+        new.parent.mkdir(parents=True, exist_ok=True)
         os.replace(old, new)
     except OSError as err:
+        # exists()/mkdir()/replace all inside the try so a permission or space failure preparing
+        # the move surfaces as the documented CredBoxError, not a raw OSError past the contract.
         if err.errno == errno.EXDEV:
             raise CredBoxError(
                 f"cannot relocate {old} to {new}: different filesystems (EXDEV); "

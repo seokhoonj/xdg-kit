@@ -52,6 +52,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Our errors are built content-free (path/name/kind only), so this never prints a secret.
         print(f"credbox: error: {err}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        # Ctrl-C at the no-echo `set` prompt: a clean content-free exit, not a traceback.
+        print("credbox: aborted", file=sys.stderr)
+        return 130
+    except Exception:
+        # Terminal guard: an unexpected exception must not reach the interpreter's excepthook,
+        # whose frame-locals dump (under rich/cgitb/pytest) could expose a prompted `value`.
+        # Content-free -- the specific catches above already handle every error we describe.
+        print("credbox: error: unexpected internal error", file=sys.stderr)
+        return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:

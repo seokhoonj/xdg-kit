@@ -5,6 +5,9 @@ git invokes ``git-credential-credbox <get|store|erase>`` and writes ``key=value`
 terminated by a blank line. The mapping is: the git ``host`` is the credbox ``app``, the git
 ``username`` is the credbox secret ``name``, and the password is the secret value.
 
+The helper uses the plaintext file store (``default_backend()``); it does not consult the OS
+keyring, so a credential stored with ``credbox set --keyring`` is not served here.
+
 Leak-surface discipline: on ``get`` the only thing written to stdout is the credential
 reply (``username=...\npassword=...``); on any error nothing is written to stdout (git treats an
 empty reply as "no credential") and a content-free note goes to stderr -- never the secret, never
@@ -19,7 +22,7 @@ from typing import TextIO
 
 from credbox.backends import default_backend
 from credbox.credentials import Credentials
-from credbox.errors import CredBoxError, InvalidAppNameError
+from credbox.errors import InvalidAppNameError
 from credbox.paths import app_dir_segment
 
 
@@ -29,8 +32,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     stdout, which git reads as "no credential"."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     operation = arguments[0] if arguments else ""
-    fields = _read_fields(sys.stdin)
     try:
+        # _read_fields is inside the try: git feeds `password=<secret>` on stdin, so the parsed
+        # fields hold the secret. Any failure reading or handling them must be caught here and
+        # not escape as a traceback whose frame-locals (`fields`) would expose the password under
+        # a locals-dumping excepthook.
+        fields = _read_fields(sys.stdin)
         if operation == "get":
             _do_get(fields)
         elif operation == "store":
@@ -40,8 +47,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # any other operation: git ignores unknown helpers' output -- do nothing.
     except InvalidAppNameError:
         return 0   # the host does not map to a valid store name -> no credential, quietly
-    except CredBoxError:
-        # content-free: nothing on stdout (git prompts), a generic note on stderr, no traceback.
+    except Exception:
+        # Every failure -- our CredBoxError or any unexpected one -- is content-free here: nothing
+        # on stdout (git prompts), a generic note on stderr, never a secret and never a traceback.
         print("credbox: git-credential error", file=sys.stderr)
     return 0
 
@@ -62,9 +70,9 @@ def _do_get(fields: dict[str, str]) -> None:
         if value is not None:
             _write_reply(sys.stdout, username=username, password=value.reveal())
         return
-    # First contact without a username: use the sole stored name if exactly one exists. Under a
-    # keyring backend, names() lists only the fallback file, so a keyring-only store may yield
-    # nothing here (a defined empty reply -> git prompts), which is documented, not a break.
+    # First contact without a username: use the sole stored name if exactly one exists. The helper
+    # reads the file store only (default_backend()), so a name stored via `credbox set --keyring`
+    # is not visible here and this yields nothing (a defined empty reply -> git prompts).
     names = backend.names(app)
     if len(names) == 1:
         value = backend.get(app, names[0])

@@ -192,9 +192,9 @@ def _keyring_operation_error(app: str, name: str) -> CredentialsError:
 # non-ImportError, which must be folded into a status here rather than escape as a raw traceback
 # whose frame retains `raw`.
 #
-# The catch is deliberately total -- it does NOT re-raise MemoryError the way storecodec/scrub do.
+# The catch is deliberately total -- it does NOT re-raise MemoryError the way _storecodec/scrub do.
 # All three run with a secret in frame (_try_keyring_set holds `raw`), so the difference is not
-# "who has a secret" but what swallowing PRODUCES. storecodec/scrub let MemoryError propagate only
+# "who has a secret" but what swallowing PRODUCES. _storecodec/scrub let MemoryError propagate only
 # because their swallow-alternative is worse than the frame-locals exposure -- a misclassified
 # fault, or a returned still-unscrubbed string. Here swallowing yields a safe status instead ("failed"
 # -> fail-closed raise; "no_backend" -> file fallback), so there is nothing to trade: folding a
