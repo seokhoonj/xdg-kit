@@ -44,7 +44,7 @@ def test_degraded_cross_process_locking_warns_once_and_still_writes(monkeypatch,
     from credbox.backends import _store
 
     monkeypatch.setattr(_store, "lock_exclusive", lambda handle, *, blocking: False)
-    _store._warned_no_oslock.clear()
+    # _warned_no_oslock is reset by the autouse conftest fixture, so no manual clear here.
     backend = FileBackend()
     backend.set("myapp", "a", value="va")
     backend.set("myapp", "b", value="vb")   # same store path -> must not warn a second time

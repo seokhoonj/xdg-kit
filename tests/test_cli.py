@@ -95,3 +95,82 @@ def test_missing_keyring_extra_prints_pip_hint(
     assert rc == 1
     assert "pip install credbox[keyring]" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_path_and_dirs_print_resolved_locations(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["path", "myapp"]) == 0
+    assert str(FileBackend().path("myapp")) == capsys.readouterr().out.strip()
+    assert main(["dirs", "myapp"]) == 0
+    dirs_out = capsys.readouterr().out
+    for kind in ("config", "data", "state", "cache", "runtime"):
+        assert kind in dirs_out
+
+
+def test_doctor_warns_on_a_group_readable_credentials_file(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX mode bits only")
+    main(["set", "myapp", "k", "--value", "v"])
+    capsys.readouterr()
+    path = FileBackend().path("myapp")
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)   # 0640: group-readable
+    assert main(["doctor", "myapp"]) == 0
+    captured = capsys.readouterr()
+    assert "chmod 600" in captured.err
+    assert "checked 1" in captured.out
+
+
+def test_doctor_with_no_apps_reports_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["doctor"]) == 0
+    assert "checked 0" in capsys.readouterr().out
+
+
+def test_get_resolve_consults_the_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("API_KEY", "from-the-environment")
+    assert main(["get", "myapp", "API_KEY", "--resolve", "--reveal"]) == 0
+    assert capsys.readouterr().out.strip() == "from-the-environment"
+
+
+def test_set_without_value_on_noninteractive_stdin_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _raise_eof(_prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("credbox.cli.getpass.getpass", _raise_eof)
+    assert main(["set", "myapp", "k"]) == 2
+    assert "stdin is not interactive" in capsys.readouterr().err
+
+
+def test_keyboard_interrupt_at_prompt_exits_130_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _interrupt(_prompt: str) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("credbox.cli.getpass.getpass", _interrupt)
+    assert main(["set", "myapp", "k"]) == 130
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+
+
+def test_unexpected_exception_is_content_free_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An unexpected failure must be caught by the terminal guard: exit 1, a content-free stderr
+    # line, and no traceback (a prompted `value` local must not reach a locals-dumping excepthook).
+    def _boom(_prompt: str) -> str:
+        raise RuntimeError("unexpected failure carrying sk_live_0123456789abcdef")
+
+    monkeypatch.setattr("credbox.cli.getpass.getpass", _boom)
+    assert main(["set", "myapp", "k"]) == 1
+    captured = capsys.readouterr()
+    assert SECRET not in captured.err + captured.out
+    assert "Traceback" not in captured.err

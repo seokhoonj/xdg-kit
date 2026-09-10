@@ -60,8 +60,36 @@ def test_set_strips_surrounding_whitespace() -> None:
 
 
 def test_set_refuses_a_blank_value() -> None:
-    with pytest.raises(ValueError):
+    from credbox.errors import BlankSecretError
+
+    with pytest.raises(BlankSecretError):
         Credentials("myapp").set("k", value="   ")
+
+
+def test_blank_secret_error_is_both_credbox_and_value_error() -> None:
+    # Rooted in the CredBoxError family (so `except CredBoxError` catches it) and still a
+    # ValueError (a blank is a caller mistake), mirroring InvalidAppNameError.
+    from credbox.errors import BlankSecretError, CredBoxError
+
+    assert issubclass(BlankSecretError, CredBoxError)
+    assert issubclass(BlankSecretError, ValueError)
+
+
+def test_blank_override_falls_through_to_the_store() -> None:
+    creds = Credentials("myapp")
+    creds.set("k", value="stored")
+    assert creds.secret("k", override="   ").reveal() == "stored"  # type: ignore[union-attr]
+
+
+def test_secret_override_is_used() -> None:
+    assert Credentials("myapp").secret("k", override=Secret("ov")).reveal() == "ov"  # type: ignore[union-attr]
+
+
+def test_first_shared_store_wins_over_later_ones() -> None:
+    Credentials("a").set("K", value="from-a")
+    Credentials("b").set("K", value="from-b")
+    creds = Credentials("myapp", shared=["a", "b"])   # order: a before b
+    assert creds.require("K").reveal() == "from-a"
 
 
 def test_set_accepts_a_secret() -> None:

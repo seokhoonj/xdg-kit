@@ -115,6 +115,27 @@ def test_scrub_propagates_memory_error_instead_of_returning_unscrubbed():
         scrub_exception(ValueError("sk-secret here"), secrets_then_oom())
 
 
+def test_scrub_exception_scrubs_secrets_nested_in_non_string_args():
+    # A secret inside a list/dict/tuple arg is rendered verbatim by str(err), so it must be
+    # scrubbed too -- not left because the top-level arg is not a str.
+    err = ValueError(["token sk-secret in a list", {"k": "sk-secret in a dict"}, ("sk-secret",)])
+    scrub_exception(err, ["sk-secret"])
+    rendered = repr(err.args)
+    assert "sk-secret" not in rendered
+    assert REDACTION in rendered
+
+
+def test_scrub_exception_propagates_memory_error_from_arg_scrub():
+    # The per-node MemoryError guard must re-raise, not swallow into leaving the node's args
+    # unscrubbed. Force the OOM inside the string replace that scrubs an arg.
+    class OomStr(str):
+        def replace(self, *_args: object, **_kwargs: object) -> str:
+            raise MemoryError("out of memory scrubbing")
+
+    with pytest.raises(MemoryError):
+        scrub_exception(ValueError(OomStr("sk-secret")), ["sk-secret"])
+
+
 def test_scrub_exception_walks_context_chain():
     # an implicit __context__ (a raise inside an except, without `from`) is a separate edge
     # from __cause__ and must also be scrubbed

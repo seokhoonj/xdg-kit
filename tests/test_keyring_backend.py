@@ -179,3 +179,32 @@ def test_names_reports_only_the_fallback(monkeypatch: pytest.MonkeyPatch) -> Non
     fallback = FileBackend()
     fallback.set("app", "k", value="v")
     assert KeyringBackend(fallback=fallback).names("app") == ["k"]
+
+
+def test_set_and_unset_fall_back_to_file_when_no_keyring_backend(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The write-side of the headless fallback (the normal path on cron/container/server hosts):
+    # with no OS keyring, set/unset delegate to the file store and warn exactly once.
+    keyring = _install_fake_keyring(monkeypatch)
+
+    def no_backend(*args: object, **kwargs: object) -> str:
+        raise keyring.errors.NoKeyringError("no backend on this host")
+
+    monkeypatch.setattr(keyring, "set_password", no_backend)
+    monkeypatch.setattr(keyring, "get_password", no_backend)
+    monkeypatch.setattr(keyring, "delete_password", no_backend)
+    fallback = FileBackend()
+    backend = KeyringBackend(fallback=fallback)
+
+    backend.set("app", "name", value=SECRET)
+    backend.set("app", "other", value="second")   # same process -> still one warning
+    assert fallback.get("app", "name").reveal() == SECRET   # type: ignore[union-attr]
+    assert backend.get("app", "name").reveal() == SECRET    # type: ignore[union-attr]
+
+    backend.unset("app", "name")
+    assert fallback.get("app", "name") is None
+
+    err = capsys.readouterr().err
+    assert err.count("OS keyring unavailable") == 1
+    assert SECRET not in err

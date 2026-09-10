@@ -63,8 +63,10 @@ def _reset_warned_registries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the module-level warn-once state so a warning emitted by one test cannot suppress
     (or leak into) another -- otherwise assertions on a one-time warning would depend on test
     order. Tolerant of which package/module is importable during the credbox transition."""
+    import credbox.backends._store as store
     import credbox.backends.keyring as keyring_backend
     import credbox.permissions as permissions
 
     monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
     monkeypatch.setattr(keyring_backend, "_warned_keyring_fallback", False)
+    monkeypatch.setattr(store, "_warned_no_oslock", set())
