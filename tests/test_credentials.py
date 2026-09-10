@@ -66,6 +66,13 @@ def test_set_refuses_a_blank_value() -> None:
         Credentials("myapp").set("k", value="   ")
 
 
+def test_shared_as_a_bare_string_is_rejected() -> None:
+    # shared="auth" would iterate into 'a','u','t','h' and consult four bogus stores; reject it.
+    # (mypy does NOT flag this -- a str IS a Sequence[str] -- so the runtime guard is the defense.)
+    with pytest.raises(TypeError):
+        Credentials("myapp", shared="auth")
+
+
 def test_set_refuses_a_blank_name() -> None:
     from credbox.errors import BlankSecretError
 

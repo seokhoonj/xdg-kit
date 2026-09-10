@@ -19,6 +19,7 @@ redact; this module never reads a store.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TypeAlias
 from urllib.parse import quote, quote_plus
 
 from credbox.secret import Secret
@@ -30,8 +31,11 @@ __all__ = [
 
 REDACTION = "***"
 
+# A single secret OR an iterable of them; a bare str/Secret is one secret, never iterated.
+SecretsArg: TypeAlias = "str | Secret | Iterable[str | Secret]"
 
-def scrub_secrets(text: str, secrets: Iterable[str | Secret]) -> str:
+
+def scrub_secrets(text: str, secrets: SecretsArg) -> str:
     """Return ``text`` with every non-empty value in ``secrets`` -- and each value's
     URL-encoded (``quote`` / ``quote_plus``) forms -- replaced by ``***``.
 
@@ -50,7 +54,7 @@ def scrub_secrets(text: str, secrets: Iterable[str | Secret]) -> str:
     return _replace_targets(text, _redaction_targets(secret_values))
 
 
-def scrub_exception(err: BaseException, secrets: Iterable[str | Secret]) -> BaseException:
+def scrub_exception(err: BaseException, secrets: SecretsArg) -> BaseException:
     """Scrub every secret in ``secrets`` from ``err`` and its ``__cause__`` / ``__context__``
     chain, in place, and return ``err``. Best-effort: any failure while inspecting a node is
     swallowed, so this never raises on the error path.
@@ -95,11 +99,14 @@ def scrub_exception(err: BaseException, secrets: Iterable[str | Secret]) -> Base
     return err
 
 
-def _redactable_values(secrets: Iterable[str | Secret]) -> list[str]:
-    """The non-empty raw strings to redact, drawn from an iterable of ``str`` and/or ``Secret``.
-    A ``Secret`` is revealed here -- the point of use for redaction -- so passing one (the natural
-    call, since ``Credentials`` hands back ``Secret``s) redacts it instead of silently doing
-    nothing. Any other type is skipped."""
+def _redactable_values(secrets: SecretsArg) -> list[str]:
+    """The non-empty raw strings to redact, drawn from a single ``str``/``Secret`` OR an iterable
+    of them. A bare ``str``/``Secret`` is treated as one secret, NOT iterated -- otherwise
+    ``scrub_secrets(log, "apikey")`` (the natural single-secret call) would walk the string into
+    characters and redact every letter, shredding the log while missing the secret. A ``Secret`` is
+    revealed here, the point of use for redaction. Any other item type is skipped."""
+    if isinstance(secrets, (str, Secret)):
+        secrets = [secrets]
     values: list[str] = []
     for item in secrets:
         raw = item.reveal() if isinstance(item, Secret) else item

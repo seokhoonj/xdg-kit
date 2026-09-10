@@ -127,7 +127,8 @@ def _add_keyring_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--keyring",
         action="store_true",
-        help="use the OS keyring backend (falls back to the file store when unavailable)",
+        help="use the OS keyring backend (requires credbox[keyring]; falls back to the file "
+        "store when the keyring is unavailable at runtime)",
     )
 
 
@@ -138,15 +139,20 @@ def _credentials(args: argparse.Namespace) -> Credentials:
 def _cmd_set(args: argparse.Namespace) -> int:
     if args.value is not None:
         value = args.value
+    elif sys.stdin.isatty():
+        value = getpass.getpass(f"{args.name}: ")   # interactive: no echo, never in shell history
     else:
-        try:
-            value = getpass.getpass(f"{args.name}: ")   # no echo -- never in shell history
-        except EOFError:
+        # Non-interactive stdin (a pipe or heredoc): read one line as the value. This is the
+        # argv-safe scripted path -- unlike --value, the secret never appears in the process
+        # argument list -- and avoids getpass's misleading "input may be echoed" warning on a pipe.
+        line = sys.stdin.readline()
+        if not line:
             print(
-                "credbox: error: no value provided and stdin is not interactive; pass --value",
+                "credbox: error: no value on stdin and no --value given",
                 file=sys.stderr,
             )
             return 2
+        value = line.rstrip("\n")
     if not value.strip():
         # A whitespace-only value reads back as absent, so reject it rather than store a false
         # "stored" (and rather than let Credentials.set raise a ValueError as a traceback).
@@ -199,14 +205,19 @@ def _cmd_dirs(args: argparse.Namespace) -> int:
 def _cmd_doctor(args: argparse.Namespace) -> int:
     apps = args.app or _discover_apps()
     checked = 0
+    insecure = False
     for app in apps:
         path = FileBackend().path(app)
         if path.exists():
             checked += 1
-            warn_if_group_or_world_readable(path, app=app)
-            _warn_if_dir_group_or_world_accessible(config_dir(app), app=app)
+            # OR (not short-circuit) so both the file and dir warnings always print.
+            file_bad = warn_if_group_or_world_readable(path, app=app)
+            dir_bad = _warn_if_dir_group_or_world_accessible(config_dir(app), app=app)
+            insecure = insecure or file_bad or dir_bad
     print(f"checked {checked} credentials file(s)")
-    return 0
+    # Exit 1 when anything was found accessible beyond its owner, so a CI/monitoring gate can key
+    # off the exit code; 0 when every checked file/dir is owner-only.
+    return 1 if insecure else 0
 
 
 def _discover_apps() -> list[str]:
@@ -228,21 +239,23 @@ def _discover_apps() -> list[str]:
     return sorted(discovered_apps)
 
 
-def _warn_if_dir_group_or_world_accessible(directory: Path, *, app: str) -> None:
+def _warn_if_dir_group_or_world_accessible(directory: Path, *, app: str) -> bool:
     """Warn on stderr when the config directory holding a credentials file is reachable by group
-    or others -- it should be mode 0700. POSIX-only, best-effort."""
+    or others -- it should be mode 0700. Returns whether it is insecure. POSIX-only, best-effort."""
     if os.name != "posix" or not directory.is_dir():
-        return
+        return False
     try:
         mode = directory.stat().st_mode
     except OSError:
-        return
-    if mode & 0o077:
-        print(
-            f"{app}: warning: {directory} is accessible by group/other; "
-            f"restrict it with 'chmod 700'",
-            file=sys.stderr,
-        )
+        return False
+    if not mode & 0o077:
+        return False
+    print(
+        f"{app}: warning: {directory} is accessible by group/other; "
+        f"restrict it with 'chmod 700'",
+        file=sys.stderr,
+    )
+    return True
 
 
 if __name__ == "__main__":

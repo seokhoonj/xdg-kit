@@ -44,31 +44,34 @@ _warned_permissive_paths: set[str] = set()
 _warn_lock = threading.Lock()
 
 
-def warn_if_group_or_world_readable(path: Path, *, app: str) -> None:
-    """Warn once, on stderr, when ``path`` is readable by group or others -- a secret file
-    should be mode 0600. POSIX-only and best-effort: a ``stat`` failure is ignored (the read
-    that called this already succeeded), and the same path warns at most once per process.
-    ``app`` names the program in the message so the warning reads in its voice."""
+def warn_if_group_or_world_readable(path: Path, *, app: str) -> bool:
+    """Return whether ``path`` is readable by group or others (insecure -- a secret file should be
+    mode 0600), and warn on stderr the first time each path is seen so the message is not repeated.
+    The RETURN reflects the actual permission state on every call (so a caller like ``doctor`` can
+    key an exit code off it), independent of the once-per-path print. POSIX-only and best-effort:
+    on a non-POSIX OS or a ``stat`` failure it returns ``False``. ``app`` names the program in the
+    message so the warning reads in its voice."""
     if os.name != "posix":
-        return
+        return False
     try:
         mode = path.stat().st_mode
     except OSError:
-        return
+        return False
     if not mode & 0o077:
-        return   # safe file: the common case takes no lock, so reads never serialize on each other
-    # Only a permissive file reaches here. The check-and-record then runs under a lock so two
-    # threads seeing the same permissive path cannot both print the warning.
+        return False   # safe file: the common case takes no lock, so reads never serialize
+    # Insecure. Record-and-print under the lock so two threads seeing the same permissive path
+    # cannot both print, but return True regardless of whether this call was the one that printed.
     key = str(path)
     with _warn_lock:
-        if key in _warned_permissive_paths:
-            return
+        already_warned = key in _warned_permissive_paths
         _warned_permissive_paths.add(key)
-    # A file path is not a secret value; the warning names it so the user can fix it.
-    print(
-        f"{app}: warning: {path} is accessible by group/other; restrict it with 'chmod 600'",
-        file=sys.stderr,
-    )
+    if not already_warned:
+        # A file path is not a secret value; the warning names it so the user can fix it.
+        print(
+            f"{app}: warning: {path} is accessible by group/other; restrict it with 'chmod 600'",
+            file=sys.stderr,
+        )
+    return True
 
 
 def ensure_dir(path: Path, *, private: bool = False) -> Path:

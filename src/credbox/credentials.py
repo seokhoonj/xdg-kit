@@ -50,7 +50,15 @@ class Credentials:
 
         Raises:
             InvalidAppNameError: ``app`` or any ``shared`` name is not a valid directory segment.
+            TypeError: ``shared`` is a bare ``str`` -- almost always a mistake (``shared="auth"``
+                would iterate into the characters ``"a","u","t","h"`` and consult four bogus
+                stores); pass a sequence like ``["auth"]``.
         """
+        if isinstance(shared, str):
+            raise TypeError(
+                f"shared must be a sequence of app names, not a bare str {shared!r}; "
+                f"pass [{shared!r}] for a single shared store"
+            )
         self._app = app_dir_segment(app)
         self._shared = tuple(app_dir_segment(name) for name in shared)
         self._backend = backend if backend is not None else default_backend()
