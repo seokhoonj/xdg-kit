@@ -1,4 +1,4 @@
-"""Tests for the credbox CLI, focused on the leak-surface discipline (§13): only get --reveal
+"""Tests for the credbox CLI, focused on the leak-surface discipline: only get --reveal
 writes a raw secret to stdout; everything else is masked/content-free, and no path prints a
 traceback."""
 

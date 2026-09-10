@@ -3,6 +3,7 @@ content-free CredentialsError for a malformed store (the leak guarantee)."""
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,48 @@ from credbox.errors import CredentialsError
 from credbox.secret import Secret
 
 SECRET = "sk_live_TOPSECRET_0123456789"
+
+
+def test_concurrent_sets_from_many_threads_all_survive() -> None:
+    # The store set is a read-modify-write; without serialization two threads that both read the
+    # old map would each write back only their own key and the last writer would drop the other's.
+    # exclusive_store_lock (a per-path thread lock + OS lock) must keep every concurrent write.
+    # A barrier releases all threads at once to maximise overlap; each uses its own backend
+    # instance so the per-path lock is exercised across instances, not just within one.
+    count = 24
+    barrier = threading.Barrier(count)
+
+    def writer(i: int) -> None:
+        barrier.wait()
+        FileBackend().set("myapp", f"k{i}", value=f"v{i}")
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert FileBackend().names("myapp") == sorted(f"k{i}" for i in range(count))
+
+
+def test_degraded_cross_process_locking_warns_once_and_still_writes(monkeypatch, capsys) -> None:
+    # When the OS lock cannot be taken (a filesystem with no working flock), the write is NOT
+    # failed closed -- it proceeds under the thread lock alone -- but the loss of cross-process
+    # serialization is announced once per store, not silently.
+    from credbox.backends import _store
+
+    monkeypatch.setattr(_store, "lock_exclusive", lambda handle, *, blocking: False)
+    _store._warned_no_oslock.clear()
+    backend = FileBackend()
+    backend.set("myapp", "a", value="va")
+    backend.set("myapp", "b", value="vb")   # same store path -> must not warn a second time
+
+    err = capsys.readouterr().err
+    assert err.count("cross-process locking is unavailable") == 1
+    got_a = backend.get("myapp", "a")
+    got_b = backend.get("myapp", "b")
+    assert got_a is not None and got_a.reveal() == "va"   # the write still succeeded
+    assert got_b is not None and got_b.reveal() == "vb"
 
 
 def test_set_then_get_returns_a_secret() -> None:

@@ -31,6 +31,15 @@ def test_non_utf8_returns_none(tmp_path: Path) -> None:
     assert read_json(path) is None
 
 
+def test_deeply_nested_json_returns_none(tmp_path: Path) -> None:
+    # A pathologically deep nest exhausts json's parser stack (RecursionError). Like any other
+    # unparseable state file it is treated as absent, not allowed to escape as a traceback.
+    depth = 200_000
+    path = tmp_path / "deep.json"
+    path.write_text("[" * depth + "]" * depth)
+    assert read_json(path) is None
+
+
 def test_a_real_os_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "state.json"
     path.write_text("{}")

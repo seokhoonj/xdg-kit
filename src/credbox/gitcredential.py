@@ -5,7 +5,7 @@ git invokes ``git-credential-credbox <get|store|erase>`` and writes ``key=value`
 terminated by a blank line. The mapping is: the git ``host`` is the credbox ``app``, the git
 ``username`` is the credbox secret ``name``, and the password is the secret value.
 
-Leak-surface discipline (§13c): on ``get`` the only thing written to stdout is the credential
+Leak-surface discipline: on ``get`` the only thing written to stdout is the credential
 reply (``username=...\npassword=...``); on any error nothing is written to stdout (git treats an
 empty reply as "no credential") and a content-free note goes to stderr -- never the secret, never
 a traceback.

@@ -61,6 +61,11 @@ class Secret:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Secret):
             return NotImplemented
-        # Encode to bytes first: hmac.compare_digest raises TypeError on a non-ASCII str, so
-        # comparing two non-ASCII secrets as str would crash instead of comparing.
-        return hmac.compare_digest(self._value.encode("utf-8"), other._value.encode("utf-8"))
+        # Encode to bytes first: hmac.compare_digest raises TypeError on a non-ASCII str. Use
+        # errors="surrogatepass" so a value holding a lone surrogate (e.g. a secret sourced from an
+        # env var via surrogateescape) encodes to deterministic bytes rather than raising a
+        # UnicodeEncodeError whose .object/.args would carry the raw secret out of this frame.
+        return hmac.compare_digest(
+            self._value.encode("utf-8", "surrogatepass"),
+            other._value.encode("utf-8", "surrogatepass"),
+        )

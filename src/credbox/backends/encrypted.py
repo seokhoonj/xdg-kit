@@ -47,8 +47,8 @@ _WRITE_PARALLELISM = 4
 # check can reject it. A legitimate header's params sit inside these bounds, so clamping is a
 # no-op for it; only a tampered header is reshaped (and then fails the tag check anyway).
 _MAX_TIME_COST = 16
-_MAX_MEMORY_COST_KIB = 1 << 20   # 1 GiB in KiB
-_MAX_PARALLELISM = 16
+_MAX_MEMORY_COST_KIB = 4 * _WRITE_MEMORY_COST_KIB   # 256 MiB -- bounds a tampered-header alloc close
+_MAX_PARALLELISM = 16                               #   to the legitimate write cost, still a no-op for it
 
 
 class EncryptedFileBackend:
@@ -157,7 +157,10 @@ def _derive_key(passphrase: str, salt: bytes, *, time_cost: int, memory_cost: in
         lanes=lanes,
         memory_cost=memory_cost,
     )
-    return kdf.derive(passphrase.encode("utf-8"))
+    # surrogatepass: a passphrase holding a lone surrogate (e.g. sourced from an env var via
+    # surrogateescape) encodes to deterministic bytes instead of raising UnicodeEncodeError, whose
+    # .object/.args and this frame's locals (passphrase, plaintext) would otherwise leak the secret.
+    return kdf.derive(passphrase.encode("utf-8", "surrogatepass"))
 
 
 def _encrypt(plaintext: bytes, passphrase: str) -> bytes:
@@ -206,10 +209,15 @@ def _try_decrypt(blob: bytes, passphrase: str) -> bytes | None:
         lanes = _clamp(int(header["p"]), 1, _MAX_PARALLELISM)
         key = _derive_key(passphrase, salt, time_cost=time_cost, memory_cost=memory_cost, lanes=lanes)
         return AESGCM(key).decrypt(nonce, ciphertext, header_json)
-    except (InvalidTag, ValueError, KeyError, TypeError, RecursionError,
+    except (InvalidTag, ValueError, KeyError, TypeError, RecursionError, OverflowError,
             json.JSONDecodeError, UnicodeDecodeError):
-        # RecursionError: a tampered header whose JSON nests thousands of levels would otherwise
-        # escape as a traceback whose frames retain `passphrase`/`blob` (storecodec catches it too).
+        # Every way a tampered/garbage header can fault maps to None here, so nothing escapes with
+        # `passphrase`/`blob` retained in this frame's traceback. Two non-obvious members:
+        # RecursionError -- a header whose JSON nests thousands of levels; OverflowError -- a header
+        # param like {"t": 1e999} parses to float('inf'), and int(inf) raises OverflowError (not a
+        # ValueError). Only MemoryError/KeyboardInterrupt propagate: an OOM is not a malformed
+        # header, so folding it to "wrong passphrase or tampering" would misclassify it, exactly as
+        # storecodec keeps its own catches narrow.
         return None
 
 

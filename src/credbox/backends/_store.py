@@ -13,6 +13,7 @@ OS lock cannot be taken, it degrades to the thread lock alone.
 
 from __future__ import annotations
 
+import sys
 import threading
 import weakref
 from collections.abc import Iterator
@@ -41,6 +42,28 @@ _thread_lock_by_store_path: weakref.WeakValueDictionary[str, threading.Lock] = (
 )
 _thread_lock_registry_guard = threading.Lock()
 
+# Paths for which we have already warned that cross-process locking is unavailable, so the notice
+# is printed at most once per store rather than on every degraded write.
+_warned_no_oslock: set[str] = set()
+_warn_lock = threading.Lock()
+
+
+def _warn_no_oslock_once(path: Path) -> None:
+    """Warn once, on stderr, that the OS lock could not be taken for ``path`` so writes are
+    serialized only within this process. Content-free: a store path is not a secret value. Not
+    fail-closed -- a filesystem with no working lock (some network mounts) must stay usable; the
+    single-process guarantee still holds and concurrent multi-process writes are the rare case."""
+    key = str(path)
+    with _warn_lock:
+        if key in _warned_no_oslock:
+            return
+        _warned_no_oslock.add(key)
+    print(
+        f"credbox: warning: cross-process locking is unavailable for {path}; concurrent writes "
+        "from other processes may not be serialized (writes within this process still are)",
+        file=sys.stderr,
+    )
+
 
 def _thread_lock_for(store_path: str) -> threading.Lock:
     """The process-wide lock for the store at ``store_path``, created on first use."""
@@ -56,7 +79,8 @@ def _thread_lock_for(store_path: str) -> threading.Lock:
 def exclusive_store_lock(path: Path) -> Iterator[None]:
     """Hold an exclusive lock over a read-modify-write of the store file ``path``. Degrades to
     thread-only serialization where no OS lock primitive exists, the lock file cannot be created,
-    or the OS lock cannot be taken -- the in-process guarantee still holds. Shared by the file and
+    or the OS lock cannot be taken -- the in-process guarantee still holds, and the degradation is
+    announced once per store on stderr rather than passing silently. Shared by the file and
     encrypted backends so their writes serialize against each other on the same store."""
     thread_lock = _thread_lock_for(str(path))   # a strong ref for the duration of the critical section
     thread_lock.acquire()
@@ -69,6 +93,8 @@ def exclusive_store_lock(path: Path) -> Iterator[None]:
         locked = False
         try:
             locked = handle is not None and lock_exclusive(handle, blocking=True)
+            if not locked:
+                _warn_no_oslock_once(path)   # degraded to thread-only: surface it, do not fail closed
             yield
         finally:
             if handle is not None:

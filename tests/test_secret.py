@@ -1,7 +1,7 @@
 """Tests for the ``Secret`` value type and ``mask_secret``.
 
-These pin the council-review fixes: the ``edge <= 0`` whole-secret disclosure (the ``-0``
-slice footgun) and the ``__eq__`` crash on a non-ASCII secret.
+These pin the leak-safety invariants: the ``edge <= 0`` whole-secret disclosure (the ``-0``
+slice footgun) and the ``__eq__`` crash on a non-ASCII or lone-surrogate secret.
 """
 
 from __future__ import annotations
@@ -61,6 +61,14 @@ def test_equality_of_non_ascii_secrets_does_not_crash() -> None:
     # to bytes first so a secret with a non-ASCII char compares instead of crashing.
     assert Secret("café_péé") == Secret("café_péé")
     assert Secret("péér") != Secret("pééx")
+
+
+def test_equality_of_lone_surrogate_secrets_does_not_crash() -> None:
+    # A plain str .encode("utf-8") raises UnicodeEncodeError on a lone surrogate, and that
+    # exception's .object/.args carry the raw secret. surrogatepass encoding must let such a
+    # value compare instead of raising a secret-bearing exception out of __eq__.
+    assert Secret("tok-\udc80") == Secret("tok-\udc80")
+    assert Secret("tok-\udc80") != Secret("tok-\udc81")
 
 
 def test_equality_against_a_non_secret_is_false_and_never_raises() -> None:

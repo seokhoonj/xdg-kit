@@ -32,7 +32,13 @@ def keyring_backend(*, fallback: SecretBackend | None = None) -> SecretBackend:
     """
     if importlib.util.find_spec("keyring") is None:
         raise MissingExtraError(extra="keyring", dist="credbox[keyring]")
-    from credbox.backends.keyring import KeyringBackend  # outside any except
+    # Execute the keyring package here, outside any except, so a broken-but-installed keyring fails
+    # loudly at construction -- where no secret is in flight -- rather than being caught later in a
+    # per-operation helper, misclassified as "no backend", and silently downgraded to the plaintext
+    # fallback at runtime.
+    import keyring  # noqa: F401
+
+    from credbox.backends.keyring import KeyringBackend
     return KeyringBackend(fallback=fallback)
 
 
