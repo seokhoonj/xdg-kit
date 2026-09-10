@@ -7,7 +7,7 @@
 
 **English** | [한국어](README.ko.md)
 
-A secure **secret store** for Python apps and CLIs — XDG paths by default, OS-native (macOS/Windows) on request — leak-safe by construction.
+A secure **secret store** for Python apps and CLIs — XDG paths by default, OS-native (Linux/macOS/Windows) on request — leak-safe by construction.
 
 Every command-line app has to resolve its secrets and find where its files live. credbox does
 both, once, the same way on every OS — and treats *not leaking the secret* as the whole job:
@@ -179,8 +179,8 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, else a secured 0700 temp dir
 The app name is validated as a single path segment, so a crafted name can never escape its base.
 `data_dir` and `state_dir` honour a per-app `<PREFIX>_DATA_DIR` / `<PREFIX>_STATE_DIR` override (an
 absolute path used as-is), where `<PREFIX>` is `env_var_prefix(app)`. By default paths use the XDG
-`~/.config` layout on every OS; pass `layout="native"` for OS-native locations (macOS
-`~/Library/Application Support`, Windows `%LOCALAPPDATA%`), or set `CREDBOX_LAYOUT`.
+`~/.config` layout on every OS; pass `layout="native"` for OS-native locations (Linux `~/.config`,
+macOS `~/Library/Application Support`, Windows `%LOCALAPPDATA%`), or set `CREDBOX_LAYOUT`.
 
 **Windows note:** the 0600/0700 mode bits are POSIX-only. On Windows there is no such mode; credbox
 relies on the per-user `%LOCALAPPDATA%` ACL, and does not claim a mode guarantee it cannot deliver
@@ -235,7 +235,7 @@ The lock lives in `runtime_dir` and is released by the OS when the process exits
 | `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `DecryptionError` / `MissingExtraError` | The exception hierarchy. |
 | `__version__` | The installed package version string. |
 
-### Building blocks (for library authors — rarely called directly)
+### Building blocks (for library authors)
 
 | Import | What it is |
 |--------|------------|
@@ -247,4 +247,4 @@ The lock lives in `runtime_dir` and is released by the OS when the process exits
 
 ## 11. License
 
-MIT
+[MIT](LICENSE)
