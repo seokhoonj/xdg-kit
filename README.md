@@ -247,4 +247,4 @@ The lock lives in `runtime_dir` and is released by the OS when the process exits
 
 ## 11. License
 
-MIT
+[MIT](LICENSE) © Seokhoon Joo
