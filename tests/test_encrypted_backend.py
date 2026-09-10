@@ -63,8 +63,11 @@ def test_tampered_ciphertext_fails_closed() -> None:
     blob = bytearray(path.read_bytes())
     blob[-1] ^= 0x01   # flip a ciphertext/tag bit
     path.write_bytes(bytes(blob))
-    with pytest.raises(DecryptionError):
+    with pytest.raises(DecryptionError) as excinfo:
         _backend().get("myapp", "api_key")
+    err = excinfo.value
+    assert SECRET not in str(err)
+    assert err.__cause__ is None and err.__context__ is None   # the InvalidTag never rides along
 
 
 def test_tampered_header_fails_via_aad_binding() -> None:
@@ -82,8 +85,11 @@ def test_tampered_header_fails_via_aad_binding() -> None:
     new_header = json.dumps(header, sort_keys=True).encode("utf-8")
     tampered = len(new_header).to_bytes(_HEADER_LEN_BYTES, "big") + new_header + rest
     path.write_bytes(tampered)
-    with pytest.raises(DecryptionError):
+    with pytest.raises(DecryptionError) as excinfo:
         _backend().get("myapp", "api_key")
+    err = excinfo.value
+    assert SECRET not in str(err)
+    assert err.__cause__ is None and err.__context__ is None
 
 
 @pytest.mark.parametrize(
@@ -247,12 +253,15 @@ def test_blob_relocated_from_another_app_fails_closed() -> None:
     # against its own header but its bound app will not match the store it now sits in, so it is
     # rejected rather than silently serving the other app's secrets.
     _backend().set("appA", "api_key", value=SECRET)
+    # The blob is genuinely valid in its OWN store -- so the rejection below is proven to be the
+    # app-binding, not a broken blob.
+    assert _backend().get("appA", "api_key").reveal() == SECRET   # type: ignore[union-attr]
     stolen = EncryptedFileBackend(passphrase=PASSPHRASE).path("appA").read_bytes()
     victim_path = EncryptedFileBackend(passphrase=PASSPHRASE).path("appB")
     victim_path.parent.mkdir(parents=True, exist_ok=True)
     victim_path.write_bytes(stolen)
     with pytest.raises(DecryptionError):
-        _backend().get("appB", "api_key")
+        _backend().get("appB", "api_key")   # same passphrase, decrypts, but bound app != appB
 
 
 def test_each_encryption_uses_a_fresh_nonce() -> None:

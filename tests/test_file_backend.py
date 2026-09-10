@@ -3,6 +3,7 @@ content-free CredentialsError for a malformed store (the leak guarantee)."""
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
@@ -13,6 +14,13 @@ from credbox.errors import CredentialsError
 from credbox.secret import Secret
 
 SECRET = "sk_live_TOPSECRET_0123456789"
+
+
+def _write_keys(keys: list[str]) -> None:
+    """Module-level so a forked child can run it: write each key to the shared store."""
+    backend = FileBackend()
+    for key in keys:
+        backend.set("crossproc", key, value=f"v-{key}")
 
 
 def test_concurrent_sets_from_many_threads_all_survive() -> None:
@@ -35,6 +43,26 @@ def test_concurrent_sets_from_many_threads_all_survive() -> None:
         t.join()
 
     assert FileBackend().names("myapp") == sorted(f"k{i}" for i in range(count))
+
+
+def test_cross_process_writes_all_survive_under_the_os_lock() -> None:
+    # The OS file lock in exclusive_store_lock exists to serialize the read-modify-write across
+    # PROCESSES (the per-path thread lock only covers one process). Two forked processes each write
+    # N disjoint keys to one store concurrently; with the flock all 2N survive, and disabling it
+    # (blocking=False, or dropping the lock) makes their RMWs clobber each other -> keys lost.
+    if os.name != "posix":
+        pytest.skip("advisory file locks (fork)")
+    import multiprocessing as mp
+
+    n = 25
+    child_keys = [f"c{i}" for i in range(n)]
+    parent_keys = [f"p{i}" for i in range(n)]
+    proc = mp.get_context("fork").Process(target=_write_keys, args=(child_keys,))
+    proc.start()
+    _write_keys(parent_keys)
+    proc.join(timeout=30)
+    assert proc.exitcode == 0
+    assert set(FileBackend().names("crossproc")) == set(child_keys) | set(parent_keys)
 
 
 def test_degraded_cross_process_locking_warns_once_and_still_writes(monkeypatch, capsys) -> None:
@@ -67,6 +95,16 @@ def test_set_then_get_returns_a_secret() -> None:
 
 def test_get_absent_returns_none() -> None:
     assert FileBackend().get("myapp", "absent") is None
+
+
+def test_blank_stored_value_reads_as_absent(tmp_path: Path) -> None:
+    # A whitespace-only value in a hand-edited or shared store must read back as absent (None), so
+    # it falls through resolution rather than resolving to a blank secret.
+    backend = FileBackend()
+    backend.set("myapp", "real", value="v")   # create the store dir + file
+    backend.path("myapp").write_text('{"blank": "   ", "real": "v"}')
+    assert backend.get("myapp", "blank") is None
+    assert backend.get("myapp", "real").reveal() == "v"   # type: ignore[union-attr]
 
 
 def test_set_accepts_a_secret_value() -> None:

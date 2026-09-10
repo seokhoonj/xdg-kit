@@ -64,9 +64,13 @@ def _reset_warned_registries(monkeypatch: pytest.MonkeyPatch) -> None:
     (or leak into) another -- otherwise assertions on a one-time warning would depend on test
     order. Tolerant of which package/module is importable during the credbox transition."""
     import credbox.backends._store as store
+    import credbox.backends.encrypted as encrypted
     import credbox.backends.keyring as keyring_backend
     import credbox.permissions as permissions
 
     monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
     monkeypatch.setattr(keyring_backend, "_warned_keyring_fallback", False)
     monkeypatch.setattr(store, "_warned_no_oslock", set())
+    # The Argon2id availability probe caches into a module global; reset it so a test that forces
+    # the probe (by monkeypatching it False) cannot leak that state into another test's ordering.
+    monkeypatch.setattr(encrypted, "_kdf_available", False)

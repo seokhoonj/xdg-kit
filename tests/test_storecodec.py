@@ -36,6 +36,16 @@ def test_not_json_returns_not_json_fault_with_position() -> None:
     assert result.lineno is not None and result.colno is not None
 
 
+def test_oversized_integer_literal_returns_not_json_fault_without_escaping() -> None:
+    # json.loads raises a bare ValueError (not JSONDecodeError) for a number literal past
+    # sys.get_int_max_str_digits() (4300). It must fold to a NOT_JSON fault, not escape the
+    # returning frame -- otherwise a tampered plaintext store crashes the reader and leaves the
+    # raw store bytes on the traceback. Reproduces the real bug, no mock.
+    blob = ('{"SECRETKEY":' + "7" * 5000 + "}").encode("utf-8")
+    result = parse_store(blob)   # must NOT raise
+    assert result == StoreFault(StoreFaultKind.NOT_JSON)
+
+
 def test_top_level_non_object_returns_not_object_fault() -> None:
     assert parse_store(b'["a", "b"]') == StoreFault(StoreFaultKind.NOT_OBJECT)
     assert parse_store(b'"just a string"') == StoreFault(StoreFaultKind.NOT_OBJECT)

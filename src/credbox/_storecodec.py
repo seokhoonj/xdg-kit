@@ -48,10 +48,13 @@ def parse_store(store_bytes: bytes) -> dict[str, str] | StoreFault:
     ``{name: secret}`` or a content-free ``StoreFault``.
 
     Narrow catches only: ``UnicodeDecodeError`` -> ``NOT_UTF8``; ``json.JSONDecodeError`` ->
-    ``NOT_JSON`` (keeping the int ``lineno``/``colno``); ``RecursionError`` -> ``NESTING``. A
-    parsed top level that is not a ``dict`` -> ``NOT_OBJECT``; any value that is not a ``str``
-    -> ``NOT_STRING_VALUE``, so a tampered ``{"k": {...}}`` never flows into ``Secret(str)``.
-    Anything else -- ``MemoryError``, ``KeyboardInterrupt`` -- propagates.
+    ``NOT_JSON`` (keeping the int ``lineno``/``colno``); a bare ``ValueError`` -> ``NOT_JSON``
+    (``json.loads`` raises a plain ``ValueError`` -- not ``JSONDecodeError`` -- for a number
+    literal past ``sys.get_int_max_str_digits()``; catching it here keeps a tampered store's raw
+    bytes off the escaping traceback frame); ``RecursionError`` -> ``NESTING``. A parsed top level
+    that is not a ``dict`` -> ``NOT_OBJECT``; any value that is not a ``str`` ->
+    ``NOT_STRING_VALUE``, so a tampered ``{"k": {...}}`` never flows into ``Secret(str)``. Anything
+    else -- ``MemoryError``, ``KeyboardInterrupt`` -- propagates.
     """
     try:
         text = store_bytes.decode("utf-8")
@@ -64,6 +67,10 @@ def parse_store(store_bytes: bytes) -> dict[str, str] | StoreFault:
             return StoreFault(StoreFaultKind.NESTING)
         except json.JSONDecodeError as err:
             return StoreFault(StoreFaultKind.NOT_JSON, lineno=err.lineno, colno=err.colno)
+        except ValueError:
+            # json.loads raises a bare ValueError (not JSONDecodeError) for a number literal
+            # exceeding the interpreter's integer-string-conversion limit; fold it here too.
+            return StoreFault(StoreFaultKind.NOT_JSON)
     finally:
         del text
     if not isinstance(parsed, dict):
