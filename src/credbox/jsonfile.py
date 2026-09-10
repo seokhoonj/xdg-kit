@@ -25,8 +25,10 @@ def read_json(path: Path) -> object | None:
         return None
     try:
         parsed: object = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
-        # RecursionError: deeply nested JSON exhausts the parser's stack. Like invalid JSON, a
-        # state file that will not parse is treated as absent rather than propagating a traceback.
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        # A state file that will not parse is treated as absent rather than propagating a traceback.
+        # ValueError covers json.JSONDecodeError (a subclass) AND the bare ValueError json.loads
+        # raises for a number past the integer-string-conversion limit; RecursionError covers deep
+        # nesting. A genuine OSError (handled above) still propagates.
         return None
     return parsed

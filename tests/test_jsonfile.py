@@ -45,6 +45,14 @@ def test_deeply_nested_json_returns_none(tmp_path: Path, monkeypatch: pytest.Mon
     assert read_json(path) is None
 
 
+def test_oversized_integer_literal_returns_none(tmp_path: Path) -> None:
+    # json.loads raises a bare ValueError (not JSONDecodeError) for a number past the integer-
+    # string-conversion limit; a corrupt state file must read as absent, not crash the caller.
+    path = tmp_path / "state.json"
+    path.write_text('{"cursor": ' + "9" * 5000 + "}")
+    assert read_json(path) is None
+
+
 def test_a_real_os_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "state.json"
     path.write_text("{}")

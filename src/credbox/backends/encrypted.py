@@ -236,7 +236,6 @@ def _encrypt(plaintext: bytes, passphrase: str, app: str) -> bytes:
         "t": _WRITE_TIME_COST,
         "m": _WRITE_MEMORY_COST_KIB,
         "p": _WRITE_LANES,
-        "hlen": _KEY_LEN,
         "app": app,
         "salt": base64.b64encode(salt).decode("ascii"),
     }
