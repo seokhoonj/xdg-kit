@@ -232,4 +232,4 @@ token    = Credentials("myapp").secret("API_TOKEN")  # 저장 위치와 시크�
 
 ## 12. 라이선스
 
-[MIT](LICENSE) © Seokhoon Joo
+[MIT](LICENSE)
