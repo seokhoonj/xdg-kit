@@ -26,6 +26,7 @@ from credbox.environment import (
     read_absolute_path_override,
 )
 from credbox.errors import (
+    BlankSecretError,
     CredBoxError,
     CredentialsError,
     DecryptionError,
@@ -62,6 +63,7 @@ __all__ = [
     "NoKeyringError",
     "InsecureStorageError",
     "InvalidAppNameError",
+    "BlankSecretError",
     "DecryptionError",
     "MissingExtraError",
     # resolver facade

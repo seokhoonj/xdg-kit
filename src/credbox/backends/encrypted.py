@@ -18,19 +18,20 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 from pathlib import Path
 
-from cryptography.exceptions import InvalidTag
+from cryptography.exceptions import InternalError, InvalidTag, UnsupportedAlgorithm
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
+from credbox._storecodec import StoreFault, parse_store, serialize_store
 from credbox.atomic import write_bytes_atomic
 from credbox.backends._store import exclusive_store_lock, normalize_secret_value
 from credbox.errors import CredBoxError, CredentialsError, DecryptionError
 from credbox.paths import config_dir
-from credbox.permissions import PRIVATE_FILE_MODE, restrict_dir_to_owner
+from credbox.permissions import PRIVATE_FILE_MODE
 from credbox.secret import Secret
-from credbox.storecodec import StoreFault, parse_store, serialize_store
 
 __all__ = ["EncryptedFileBackend"]
 
@@ -42,13 +43,13 @@ _SALT_LEN = 16
 # Write-time Argon2id cost (deliberately expensive -- ~100ms-scale per store open, a feature).
 _WRITE_TIME_COST = 3
 _WRITE_MEMORY_COST_KIB = 64 * 1024   # 64 MiB
-_WRITE_PARALLELISM = 4
+_WRITE_LANES = 4
 # Read-time clamps: a tampered header cannot force a huge Argon2id allocation before the AAD/tag
 # check can reject it. A legitimate header's params sit inside these bounds, so clamping is a
 # no-op for it; only a tampered header is reshaped (and then fails the tag check anyway).
 _MAX_TIME_COST = 16
 _MAX_MEMORY_COST_KIB = 4 * _WRITE_MEMORY_COST_KIB   # 256 MiB -- bounds a tampered-header alloc close
-_MAX_PARALLELISM = 16                               #   to the legitimate write cost, still a no-op for it
+_MAX_LANES = 16                                     #   to the legitimate write cost, still a no-op for it
 
 
 class EncryptedFileBackend:
@@ -113,6 +114,7 @@ class EncryptedFileBackend:
         return sorted(self._load(app))
 
     def _load(self, app: str) -> dict[str, str]:
+        _ensure_kdf_available()   # before any passphrase.reveal(), so an unsupported build is content-free
         path = self.path(app)
         try:
             blob = path.read_bytes()
@@ -135,8 +137,8 @@ class EncryptedFileBackend:
         return result
 
     def _save(self, app: str, store: dict[str, str]) -> None:
+        _ensure_kdf_available()   # before any passphrase.reveal(), so an unsupported build is content-free
         path = self.path(app)
-        restrict_dir_to_owner(path.parent)
         encoded = serialize_store(store)
         if isinstance(encoded, StoreFault):
             raise CredentialsError(f"{path} could not be serialized: a value is not encodable")
@@ -148,6 +150,36 @@ class EncryptedFileBackend:
 
 
 # --- crypto primitives ---------------------------------------------------------
+
+_kdf_available = False
+_kdf_probe_lock = threading.Lock()
+
+
+def _ensure_kdf_available() -> None:
+    """Confirm this cryptography/OpenSSL build actually provides Argon2id, raising a content-free
+    ``CredentialsError`` if not. Probed with a throwaway secret-free input and cached, and called
+    BEFORE any passphrase is revealed -- so an unsupported build fails closed here instead of
+    letting an ``UnsupportedAlgorithm``/``InternalError`` escape a later ``derive()`` whose frame
+    holds the passphrase. Not folded into ``DecryptionError`` (that would misreport a missing
+    build capability as a wrong passphrase or tampering)."""
+    global _kdf_available
+    if _kdf_available:
+        return
+    with _kdf_probe_lock:
+        if _kdf_available:
+            return
+        try:
+            Argon2id(
+                salt=b"\x00" * _SALT_LEN, length=_KEY_LEN,
+                iterations=1, lanes=1, memory_cost=8,
+            ).derive(b"")   # b"": no secret in this frame, so a raise here leaks nothing
+        except (UnsupportedAlgorithm, InternalError):
+            raise CredentialsError(
+                "this cryptography/OpenSSL build does not support Argon2id; "
+                "upgrade cryptography (>=44) or its bundled OpenSSL"
+            ) from None
+        _kdf_available = True
+
 
 def _derive_key(passphrase: str, salt: bytes, *, time_cost: int, memory_cost: int, lanes: int) -> bytes:
     kdf = Argon2id(
@@ -168,14 +200,14 @@ def _encrypt(plaintext: bytes, passphrase: str) -> bytes:
     salt = os.urandom(_SALT_LEN)
     key = _derive_key(
         passphrase, salt,
-        time_cost=_WRITE_TIME_COST, memory_cost=_WRITE_MEMORY_COST_KIB, lanes=_WRITE_PARALLELISM,
+        time_cost=_WRITE_TIME_COST, memory_cost=_WRITE_MEMORY_COST_KIB, lanes=_WRITE_LANES,
     )
     header = {
         "v": 1,
         "kdf": "argon2id",
         "t": _WRITE_TIME_COST,
         "m": _WRITE_MEMORY_COST_KIB,
-        "p": _WRITE_PARALLELISM,
+        "p": _WRITE_LANES,
         "hlen": _KEY_LEN,
         "salt": base64.b64encode(salt).decode("ascii"),
     }
@@ -205,8 +237,8 @@ def _try_decrypt(blob: bytes, passphrase: str) -> bytes | None:
             return None
         salt = base64.b64decode(header["salt"])
         time_cost = _clamp(int(header["t"]), 1, _MAX_TIME_COST)
-        memory_cost = _clamp(int(header["m"]), 8 * _MAX_PARALLELISM, _MAX_MEMORY_COST_KIB)
-        lanes = _clamp(int(header["p"]), 1, _MAX_PARALLELISM)
+        memory_cost = _clamp(int(header["m"]), 8 * _MAX_LANES, _MAX_MEMORY_COST_KIB)
+        lanes = _clamp(int(header["p"]), 1, _MAX_LANES)
         key = _derive_key(passphrase, salt, time_cost=time_cost, memory_cost=memory_cost, lanes=lanes)
         return AESGCM(key).decrypt(nonce, ciphertext, header_json)
     except (InvalidTag, ValueError, KeyError, TypeError, RecursionError, OverflowError,
@@ -217,7 +249,7 @@ def _try_decrypt(blob: bytes, passphrase: str) -> bytes | None:
         # param like {"t": 1e999} parses to float('inf'), and int(inf) raises OverflowError (not a
         # ValueError). Only MemoryError/KeyboardInterrupt propagate: an OOM is not a malformed
         # header, so folding it to "wrong passphrase or tampering" would misclassify it, exactly as
-        # storecodec keeps its own catches narrow.
+        # _storecodec keeps its own catches narrow.
         return None
 
 

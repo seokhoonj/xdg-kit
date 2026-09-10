@@ -3,7 +3,7 @@
 
 It is the reliable base everywhere -- no OS session, no network, portable across machines, the
 same headless as on a desktop -- and it is TERMINAL: it has no fallback. Reads route through the
-leak-safe ``storecodec`` (a malformed file yields a content-free ``StoreFault``, never an
+leak-safe ``_storecodec`` (a malformed file yields a content-free ``StoreFault``, never an
 exception carrying the file's bytes); writes serialize the whole read-modify-write under a
 cross-process lock so concurrent writers do not lose each other's keys.
 """
@@ -12,17 +12,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from credbox._storecodec import StoreFault, StoreFaultKind, parse_store, serialize_store
 from credbox.atomic import write_bytes_atomic
 from credbox.backends._store import exclusive_store_lock, normalize_secret_value
 from credbox.errors import CredBoxError, CredentialsError
 from credbox.paths import config_dir
 from credbox.permissions import (
     PRIVATE_FILE_MODE,
-    restrict_dir_to_owner,
     warn_if_group_or_world_readable,
 )
 from credbox.secret import Secret
-from credbox.storecodec import StoreFault, StoreFaultKind, parse_store, serialize_store
 
 __all__ = ["FileBackend"]
 
@@ -87,7 +86,7 @@ class FileBackend:
 
     def _load(self, app: str) -> dict[str, str]:
         """Parse ``credentials.json`` into a ``name -> secret`` map, or ``{}`` when absent. A
-        malformed file becomes a content-free ``CredentialsError`` via ``storecodec`` -- the raw
+        malformed file becomes a content-free ``CredentialsError`` via ``_storecodec`` -- the raw
         bytes die in ``parse_store``'s returning frame and are not bound at this raise site."""
         path = self.path(app)
         try:
@@ -105,14 +104,14 @@ class FileBackend:
         return result
 
     def _save(self, app: str, secret_value_by_name: dict[str, str]) -> None:
-        """Serialize the map and write it back to ``credentials.json`` atomically at mode 0600,
-        in a config directory hardened to 0700 first.
+        """Serialize the map and write it back to ``credentials.json`` atomically at mode 0600.
+        The config directory was already hardened to 0700 by ``exclusive_store_lock``, which wraps
+        every ``set``/``unset`` -- so this method does not repeat that.
 
         The plaintext map is a live frame-local here (the caller handed it to us to store); the
         *raised* ``CredentialsError`` carries only the path/errno, never a value -- the object-
-        level guarantee, not a claim that no plaintext exists in the frame (see storecodec)."""
+        level guarantee, not a claim that no plaintext exists in the frame (see _storecodec)."""
         path = self.path(app)
-        restrict_dir_to_owner(path.parent)
         encoded = serialize_store(secret_value_by_name)
         if isinstance(encoded, StoreFault):
             raise CredentialsError(f"{path} could not be serialized: a value is not encodable")

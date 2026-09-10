@@ -31,12 +31,17 @@ def test_non_utf8_returns_none(tmp_path: Path) -> None:
     assert read_json(path) is None
 
 
-def test_deeply_nested_json_returns_none(tmp_path: Path) -> None:
-    # A pathologically deep nest exhausts json's parser stack (RecursionError). Like any other
-    # unparseable state file it is treated as absent, not allowed to escape as a traceback.
-    depth = 200_000
+def test_deeply_nested_json_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A pathologically deep nest raises RecursionError in json.loads; like any other unparseable
+    # state file it is treated as absent, not allowed to escape as a traceback. Mock-forced (never
+    # construct the crashing input -- a real 200k-deep parse can overflow the C stack and segfault
+    # the interpreter on some builds), mirroring tests/test_storecodec.py.
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("nested too deep")
+
     path = tmp_path / "deep.json"
-    path.write_text("[" * depth + "]" * depth)
+    path.write_text("[]")
+    monkeypatch.setattr("credbox.jsonfile.json.loads", _raise)
     assert read_json(path) is None
 
 

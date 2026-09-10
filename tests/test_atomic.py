@@ -118,6 +118,26 @@ def test_fdopen_failure_wraps_and_cleans_up(tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+def test_fdopen_failure_closes_the_raw_fd(tmp_path, monkeypatch):
+    # Pin the no-leak guarantee itself: when fdopen does not adopt the mkstemp fd, os.close must
+    # be called on that fd -- otherwise a descriptor leaks on every failed write until EMFILE.
+    closed: list[int] = []
+    real_close = os.close
+
+    def recording_close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    def fdopen_boom(fd, *args, **kwargs):
+        raise OSError("fdopen failed")
+
+    monkeypatch.setattr("credbox.atomic.os.close", recording_close)
+    monkeypatch.setattr("credbox.atomic.os.fdopen", fdopen_boom)
+    with pytest.raises(CredBoxError):
+        write_bytes_atomic(tmp_path / "f", b"data")
+    assert closed, "the mkstemp fd was not closed after fdopen failed (descriptor leak)"
+
+
 def test_write_body_failure_cleans_up_temp(tmp_path, monkeypatch):
     # a failure after the temp file is opened (here fsync, standing in for any mid-write I/O
     # error) must still remove the secret-bearing temp file and surface as CredBoxError

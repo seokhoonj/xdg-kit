@@ -92,3 +92,25 @@ def test_secret_is_unhashable() -> None:
 def test_secret_rejects_a_non_str_value() -> None:
     with pytest.raises(TypeError):
         Secret(b"bytes-not-str")  # type: ignore[arg-type]
+
+
+def test_secret_refuses_pickle_and_never_serializes_the_value() -> None:
+    # Default pickling of a __slots__ object would write _value out in plaintext; refuse it so a
+    # Secret in a pickled object graph (multiprocessing arg, pickle cache) cannot leak silently.
+    import pickle
+
+    with pytest.raises(TypeError):
+        pickle.dumps(Secret(SECRET))
+
+
+def test_secret_copy_and_deepcopy_still_work_and_stay_masked() -> None:
+    # copy/deepcopy stay in memory (no serialization), so they remain supported despite the
+    # pickle refusal, and the copies are real Secrets that still mask.
+    import copy
+
+    original = Secret(SECRET)
+    for clone in (copy.copy(original), copy.deepcopy(original)):
+        assert isinstance(clone, Secret)
+        assert clone == original
+        assert SECRET not in str(clone)
+        assert clone.reveal() == SECRET

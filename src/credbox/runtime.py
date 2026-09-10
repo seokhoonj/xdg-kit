@@ -4,7 +4,7 @@
 "If ``$XDG_RUNTIME_DIR`` is not set applications should fall back to a replacement directory
 with similar capabilities and print a warning message", and requires that the directory "MUST
 be owned by the user ... its permissions MUST be 0700". On Linux a login session sets it
-(typically ``/run/user/<uid>``), but headless contexts this ecosystem runs in -- cron,
+(typically ``/run/user/<uid>``), but the headless contexts credbox commonly runs in -- cron,
 containers, macOS, Windows -- often leave it unset.
 
 So ``runtime_dir`` implements exactly that mandated fallback: when the variable is unset it
@@ -12,7 +12,7 @@ uses a per-user directory under the system temp dir, keyed to the uid so a share
 cannot be hijacked, and -- unlike the other ``*_dir`` functions -- it *creates and secures*
 the directory (mode 0700, owner-verified) before returning it, since a socket or lock placed
 in a world-writable temp dir must not be exposed. It stays quiet rather than printing a
-warning on every run, because in this ecosystem the fallback is the normal path.
+warning on every run, because in those headless contexts the fallback is the normal path.
 """
 
 from __future__ import annotations

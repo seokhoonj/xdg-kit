@@ -56,3 +56,20 @@ def test_relocate_across_filesystems_raises_rather_than_copying(
     with pytest.raises(CredBoxError):
         relocate_once(old, new)
     assert old.exists()   # never copy+unlinked
+
+
+def test_mkdir_failure_is_wrapped_as_credbox_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A permission/space failure creating the destination parent must surface as the documented
+    # CredBoxError, not a raw OSError past the contract.
+    old = tmp_path / "old.json"
+    old.write_text("payload")
+    new = tmp_path / "sub" / "new.json"
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "mkdir", _boom)
+    with pytest.raises(CredBoxError):
+        relocate_once(old, new)

@@ -11,6 +11,10 @@ and by the CLI -- there is no second, divergent masking routine.
 from __future__ import annotations
 
 import hmac
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from typing import Any
 
 __all__ = ["Secret", "mask_secret"]
 
@@ -69,3 +73,18 @@ class Secret:
             self._value.encode("utf-8", "surrogatepass"),
             other._value.encode("utf-8", "surrogatepass"),
         )
+
+    def __reduce__(self) -> NoReturn:
+        # Refuse pickling. The default reduction for a __slots__ object serialises _value, so a
+        # Secret that ended up in a pickled object graph (a multiprocessing argument, a pickle
+        # cache, a session store) would write the raw value out in plaintext -- a silent
+        # disclosure that defeats the masking/unhashable design. The message names no value.
+        raise TypeError("Secret cannot be pickled; it would serialize the raw value in plaintext")
+
+    def __copy__(self) -> Secret:
+        # copy/deepcopy stay in memory (no serialization), so they are safe and kept working
+        # explicitly -- otherwise they would fall back to __reduce__ above and raise.
+        return Secret(self._value)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Secret:
+        return Secret(self._value)

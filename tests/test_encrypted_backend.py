@@ -165,6 +165,31 @@ def test_infinite_kdf_param_in_header_fails_closed_not_overflow() -> None:
     assert err.__context__ is None
 
 
+def test_unsupported_argon2id_build_fails_closed_content_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    # On a cryptography/OpenSSL build without Argon2id, the availability probe must raise a
+    # content-free CredentialsError BEFORE any passphrase is revealed -- not let UnsupportedAlgorithm
+    # escape with the passphrase in frame, and not misclassify it as DecryptionError (tampering).
+    from cryptography.exceptions import UnsupportedAlgorithm
+
+    import credbox.backends.encrypted as enc
+    from credbox.errors import CredentialsError, DecryptionError
+
+    class _NoArgon2id:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+        def derive(self, *args: object, **kwargs: object) -> bytes:
+            raise UnsupportedAlgorithm("this OpenSSL has no argon2id")
+
+    monkeypatch.setattr(enc, "Argon2id", _NoArgon2id)
+    monkeypatch.setattr(enc, "_kdf_available", False)   # force the probe to re-run against the mock
+    backend = _backend()
+    with pytest.raises(CredentialsError) as excinfo:
+        backend.get("myapp", "api_key")
+    assert not isinstance(excinfo.value, DecryptionError)   # not misreported as tampering
+    assert PASSPHRASE.reveal() not in str(excinfo.value)
+    with pytest.raises(CredentialsError):
+        backend.set("myapp", "api_key", value=SECRET)
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")

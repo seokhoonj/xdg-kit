@@ -97,3 +97,23 @@ def test_get_never_resolves_an_environment_variable(
     assert rc == 0
     assert out == ""
     assert "AKIA-SUPER-SECRET" not in out + err
+
+
+def test_unexpected_exception_is_content_free_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An unexpected (non-CredBoxError) failure in a handler must be caught: nothing on stdout, a
+    # content-free note on stderr, and no traceback -- the parsed fields hold the password, so a
+    # traceback whose frame-locals dump would expose it must never reach the interpreter.
+    import credbox.gitcredential as gc
+
+    def _boom(_fields: dict[str, str]) -> None:
+        raise RuntimeError("unexpected internal failure with ghp_secret123 in the message")
+
+    monkeypatch.setattr(gc, "_do_get", _boom)
+    rc, out, err = _run(monkeypatch, capsys, "get", "host=github.com\nusername=alice\npassword=ghp_secret123\n\n")
+    assert rc == 0
+    assert out == ""
+    assert "ghp_secret123" not in out + err
+    assert "Traceback" not in err
+    assert err.strip() == "credbox: git-credential error"

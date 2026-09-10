@@ -30,7 +30,10 @@ __all__ = ["normalize_secret_value", "exclusive_store_lock"]
 def normalize_secret_value(value: object) -> str | None:
     """A stored value normalised to a non-empty string, or ``None`` -- so a blank entry reads as
     absent and falls through to the next resolution tier."""
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 # One lock per distinct store path, created on first use. A WeakValueDictionary bounds the registry
@@ -81,7 +84,9 @@ def exclusive_store_lock(path: Path) -> Iterator[None]:
     thread-only serialization where no OS lock primitive exists, the lock file cannot be created,
     or the OS lock cannot be taken -- the in-process guarantee still holds, and the degradation is
     announced once per store on stderr rather than passing silently. Shared by the file and
-    encrypted backends so their writes serialize against each other on the same store."""
+    encrypted backends for code reuse; each serializes concurrent writers to its OWN store file
+    (they lock distinct ``.lock`` paths, so a file write and an encrypted write do not serialize
+    against each other -- each backend owns a separate store)."""
     thread_lock = _thread_lock_for(str(path))   # a strong ref for the duration of the critical section
     thread_lock.acquire()
     try:
