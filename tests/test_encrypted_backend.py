@@ -264,6 +264,33 @@ def test_blob_relocated_from_another_app_fails_closed() -> None:
         _backend().get("appB", "api_key")   # same passphrase, decrypts, but bound app != appB
 
 
+def test_malformed_decrypted_store_leaves_no_plaintext_on_the_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A store that decrypts authentically but is not valid store JSON raises a content-free
+    # CredentialsError. Its traceback must not retain the decrypted plaintext in a frame local
+    # (the `del outcome` guard) -- otherwise a stored/logged exception keeps every secret alive.
+    import credbox.backends.encrypted as enc
+    from credbox._storecodec import StoreFault, StoreFaultKind
+    from credbox.errors import CredentialsError
+
+    _backend().set("myapp", "api_key", value=SECRET)
+    monkeypatch.setattr(enc, "parse_store", lambda _b: StoreFault(StoreFaultKind.NOT_OBJECT))
+    with pytest.raises(CredentialsError) as excinfo:
+        _backend().get("myapp", "api_key")
+    assert excinfo.value.__cause__ is None and excinfo.value.__context__ is None
+    leaked = []
+    tb = excinfo.value.__traceback__
+    while tb is not None:
+        for local_name, val in list(tb.tb_frame.f_locals.items()):   # snapshot: locals can mutate
+            if isinstance(val, (bytes, bytearray)) and SECRET.encode() in bytes(val):
+                leaked.append(f"{tb.tb_frame.f_code.co_name}.{local_name}")
+            elif isinstance(val, str) and SECRET in val:
+                leaked.append(f"{tb.tb_frame.f_code.co_name}.{local_name}")
+        tb = tb.tb_next
+    assert leaked == [], f"decrypted plaintext retained on the traceback: {leaked}"
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")

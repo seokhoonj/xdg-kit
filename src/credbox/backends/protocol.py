@@ -20,7 +20,9 @@ class SecretBackend(Protocol):
     """The store interface every backend implements.
 
     ``get`` returns the stored value as a ``Secret``, or ``None`` when the store or key is
-    absent (a whitespace-only stored value reads back as absent). ``set``/``unset`` mutate the
+    absent. The value is normalized on read -- surrounding whitespace is stripped and a
+    whitespace-only value reads back as absent (``None``), so a blank falls through to the next
+    resolution tier and never wins as an empty ``Secret``. ``set``/``unset`` mutate the
     store; ``names`` lists the stored keys, never their values. When the store is present but
     unusable a method raises a ``CredBoxError`` -- a ``CredentialsError`` for an unreadable or
     malformed store (or an absent required backend), or a ``DecryptionError`` from the encrypted

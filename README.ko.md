@@ -129,6 +129,8 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암�
 - **암호화 파일** (`[crypto]`) — passphrase의 Argon2id 해시로 키를 만든 단일 AES-GCM 블롭. 폴백 없음: 암호
   오류·변조는 값 없는 `DecryptionError`로 실패하며 평문으로 물러서지 않습니다. 헤더 전체 인증(AAD), 쓸
   때마다 새 nonce, 의도적으로 무거운 KDF가 저장소를 열 때마다 ~100ms를 더합니다 — 버그가 아닙니다.
+  **복구 경로가 없습니다**: passphrase를 잃으면 아무도 저장소를 복호화할 수 없으니, passphrase는 따로
+  백업하세요.
 
 팩토리가 선택 import를 걸러 줍니다: extra가 없으면 `keyring_backend()`·`encrypted_backend()`는
 `MissingExtraError`와 `pip install credbox[…]` 안내를 냅니다.

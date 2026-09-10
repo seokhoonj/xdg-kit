@@ -140,9 +140,12 @@ class EncryptedFileBackend:
             raise DecryptionError(
                 f"could not decrypt {path}: wrong passphrase or tampering"
             )
-        plaintext = outcome
-        result = parse_store(plaintext)
-        del plaintext
+        # `outcome` is the ONLY reference to the decrypted plaintext; drop it (not a second alias)
+        # before any raise, so a malformed-store CredentialsError's traceback frame cannot retain
+        # the decrypted store bytes. Aliasing it to a `plaintext` name and deleting only that would
+        # leave `outcome` holding the plaintext on the frame.
+        result = parse_store(outcome)
+        del outcome
         if isinstance(result, StoreFault):
             raise CredentialsError(f"the decrypted store {path} is malformed")
         return result
