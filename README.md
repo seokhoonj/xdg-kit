@@ -164,6 +164,11 @@ credbox app and the git `username` to the secret name. On `get` the helper write
 credential reply to stdout; on any error it writes nothing (git prompts) and a content-free note to
 stderr — never the secret, never a traceback.
 
+The store is keyed by host only, so the helper serves nothing for a plaintext `http://` request
+(it cannot tell an http-stored value from an https-stored one, and handing either to git over
+cleartext would be a downgrade). A host with a port (`example.com:8443`) or an IPv6 literal is
+handled. The helper reads the file store, not the OS keyring.
+
 ## 7. Directories
 
 ```python

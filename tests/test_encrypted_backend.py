@@ -190,6 +190,35 @@ def test_unsupported_argon2id_build_fails_closed_content_free(monkeypatch: pytes
         backend.set("myapp", "api_key", value=SECRET)
 
 
+def test_internal_error_at_real_derive_params_fails_closed_content_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The availability probe validates Argon2id at tiny params; a build can still reject the REAL
+    # derive params (e.g. no thread support for lanes>1) with InternalError, which _try_decrypt's
+    # catch tuple omits. _derive_key must fold it to a content-free CredentialsError (not
+    # DecryptionError -- it is a build failure, not tampering), never letting it escape with the
+    # passphrase in frame. Simulated: probe passes (real Argon2id), then derive raises InternalError.
+    from cryptography.exceptions import InternalError
+
+    import credbox.backends.encrypted as enc
+    from credbox.errors import CredentialsError, DecryptionError
+
+    backend = _backend()
+    backend.set("myapp", "api_key", value=SECRET)   # a real store, real KDF
+
+    class _FaultyArgon2id:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+        def derive(self, *args: object, **kwargs: object) -> bytes:
+            raise InternalError("openssl argon2 internal failure", [])
+
+    monkeypatch.setattr(enc, "Argon2id", _FaultyArgon2id)
+    monkeypatch.setattr(enc, "_kdf_available", True)   # skip the probe; exercise the real derive
+    with pytest.raises(CredentialsError) as excinfo:
+        _backend().get("myapp", "api_key")
+    assert not isinstance(excinfo.value, DecryptionError)
+    assert PASSPHRASE.reveal() not in str(excinfo.value)
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")

@@ -192,7 +192,18 @@ def _derive_key(passphrase: str, salt: bytes, *, time_cost: int, memory_cost: in
     # surrogatepass: a passphrase holding a lone surrogate (e.g. sourced from an env var via
     # surrogateescape) encodes to deterministic bytes instead of raising UnicodeEncodeError, whose
     # .object/.args and this frame's locals (passphrase, plaintext) would otherwise leak the secret.
-    return kdf.derive(passphrase.encode("utf-8", "surrogatepass"))
+    try:
+        return kdf.derive(passphrase.encode("utf-8", "surrogatepass"))
+    except (UnsupportedAlgorithm, InternalError):
+        # The availability probe validates Argon2id at tiny params; the REAL derive runs at 64 MiB
+        # (write) or up to the clamped 256 MiB / 16 lanes (read), which an OpenSSL build can still
+        # reject param-specifically (e.g. no thread support for lanes>1) with these -- not caught by
+        # _try_decrypt's tuple, so without this they would escape with `passphrase` in frame. Fold
+        # to a content-free CredentialsError, `from None`; NOT DecryptionError (this is a build
+        # capability failure, not wrong-passphrase-or-tampering).
+        raise CredentialsError(
+            "Argon2id key derivation failed in this cryptography/OpenSSL build"
+        ) from None
 
 
 def _encrypt(plaintext: bytes, passphrase: str) -> bytes:

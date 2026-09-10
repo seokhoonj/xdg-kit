@@ -136,6 +136,19 @@ def test_scrub_exception_propagates_memory_error_from_arg_scrub():
         scrub_exception(ValueError(OomStr("sk-secret")), ["sk-secret"])
 
 
+def test_scrub_exception_descends_into_exception_group_children():
+    # PEP 654: a group's members are in .exceptions, not on __cause__/__context__. Each member's
+    # args are exactly what this module redacts, so the walk must descend into the group.
+    group = ExceptionGroup(
+        "multiple failures",
+        [ValueError("first sk-secret"), RuntimeError("second sk-secret")],
+    )
+    scrub_exception(group, ["sk-secret"])
+    rendered = "".join(str(e) for e in group.exceptions)
+    assert "sk-secret" not in rendered
+    assert REDACTION in rendered
+
+
 def test_scrub_exception_walks_context_chain():
     # an implicit __context__ (a raise inside an except, without `from`) is a separate edge
     # from __cause__ and must also be scrubbed

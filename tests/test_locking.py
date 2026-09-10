@@ -59,3 +59,25 @@ def test_lock_name_traversal_rejected():
 def test_lock_bad_app_rejected():
     with pytest.raises(InvalidAppNameError):
         FileLock("../evil", "poll")
+
+
+def test_release_clears_state_even_when_unlock_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    # If the OS unlock fails (e.g. ENOLCK on a degraded mount), release() must still mark the lock
+    # not-held (closing the handle frees the OS lock regardless) and must not raise -- otherwise a
+    # later acquire() would short-circuit on a stale acquired=True and report "held" without
+    # re-taking the lock, silently defeating the single-instance guarantee.
+    import credbox.locking as locking
+
+    lock = FileLock("nw", "poll")
+    assert lock.acquire() is True
+
+    def _boom(_handle: object) -> None:
+        raise OSError("unlock failed on this mount")
+
+    monkeypatch.setattr(locking, "unlock", _boom)
+    lock.release()   # must not raise
+    assert lock.acquired is False
+    # a fresh lock can now genuinely take it (the OS lock was freed by the handle close)
+    other = FileLock("nw", "poll")
+    assert other.acquire() is True
+    other.release()

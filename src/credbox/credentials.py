@@ -99,9 +99,12 @@ class Credentials:
         """
         value = self.secret(name, override=override)
         if value is None:
+            # Backend-neutral hint: the env var works for every backend, but do not name a
+            # specific store command -- `credbox set` writes the plaintext file store, which the
+            # encrypted backend never reads, so hard-coding it would misdirect that consumer.
             raise CredentialsError(
                 f"required secret {name!r} is not set for {self._app}: set the {name} "
-                f"environment variable, or store it with 'credbox set {self._app} {name}'"
+                f"environment variable, or store it for this app"
             )
         return value
 
