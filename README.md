@@ -154,8 +154,10 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
   key while the keyring is reachable.)
 - **Encrypted file** (`[crypto]`) — a single AES-GCM blob keyed by an Argon2id hash of a passphrase.
   It is **terminal**: a wrong passphrase or a tampered file fails closed with a content-free
-  `DecryptionError`, never a plaintext downgrade. The whole header is authenticated (AES-GCM AAD),
-  a fresh nonce is drawn per write, and the deliberately expensive KDF adds ~100 ms-scale latency
+  `DecryptionError`, never a plaintext downgrade. The whole header is authenticated (AES-GCM AAD —
+  additional data that is not encrypted but is covered by the tamper check, so an edited header
+  fails to decrypt), a fresh nonce (a number used once per encryption) is drawn per write, and the
+  deliberately expensive KDF (key-derivation function, here Argon2id) adds ~100 ms-scale latency
   per store open — a feature, not a bug. There is **no recovery path**: lose the passphrase and the
   store cannot be decrypted by anyone, so back the passphrase up independently.
 
