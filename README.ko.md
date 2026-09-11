@@ -65,7 +65,7 @@ creds.set("API_KEY", value="sk-...")      # myapp 저장소에 저장 (str 또�
 creds.unset("API_KEY")                    # myapp 저장소에서 제거 (없으면 무시)
 creds.names()                             # ["API_KEY", ...] — 이름만, 값은 아님
 
-key.reveal()          # -> "sk-..."  HTTP 클라이언트에 넘길 실제 문자열
+key.reveal()                              # -> "sk-..."  HTTP 클라이언트에 넘길 실제 문자열
 ```
 
 `secret`·`require`는 `Secret`을 반환합니다. 실제 문자열은 `.reveal()`로 꺼냅니다. `Secret`은 `str`·`repr`
@@ -120,7 +120,7 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암�
 ```
 
 - **파일 저장소** (기본, 의존성 0) — 앱 폴더의 `credentials.json`. 어디서나 동작, `0600`(소유자만
-  읽고 쓰기, POSIX 권한) 평문 저장.
+  읽고 쓰기 — 리눅스·macOS의 파일 권한) 평문 저장.
 - **OS 키링** (`[keyring]`) — OS 볼트(macOS Keychain, GNOME Keyring 등). 쓸 수 있으면 키링이 우선이고,
   `set`·`unset` 성공 시 폴백 파일의 예전 평문 사본도 지웁니다. 키링이 **아예 없으면**(서버·cron·컨테이너)
   파일 저장소로 넘어가며 경고를 한 번 냅니다 — 사용자 모르게 평문으로 바꾸지 않습니다. **있는데 실패하면**

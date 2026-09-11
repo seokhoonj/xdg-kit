@@ -82,7 +82,7 @@ creds.set("API_KEY", value="sk-...")      # writes myapp's own store (str or Sec
 creds.unset("API_KEY")                    # removes it from myapp's store (no-op if absent)
 creds.names()                             # ["API_KEY", ...] — names only, never values
 
-key.reveal()          # -> "sk-..."  the raw string, for passing to an HTTP client
+key.reveal()                              # -> "sk-..."  the raw string, for passing to an HTTP client
 ```
 
 `secret` and `require` return a `Secret`; call `.reveal()` for the raw string. A `Secret` renders
@@ -140,8 +140,8 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
 ```
 
 - **File store** (default, zero-dep) — a `credentials.json` in the app's folder. Works reliably
-  everywhere; stores the value in plaintext at mode `0600` (owner read/write only — a POSIX
-  permission; see the Windows note in §7).
+  everywhere; stores the value in plaintext at mode `0600` (owner read/write only — a Linux/macOS
+  file permission; see the Windows note in §7).
 - **OS keyring** (`[keyring]`) — the OS-provided vault (macOS Keychain, GNOME Keyring, …). When
   reachable it is authoritative, and a successful `set`/`unset` also clears any stale plaintext
   copy from the fallback file. When *absent* (no backend on a server, cron, a container), every
