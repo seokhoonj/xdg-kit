@@ -48,6 +48,26 @@ def test_mask_negative_edge_fully_redacts() -> None:
     assert mask_secret(SECRET, edge=-3) == "***"
 
 
+def test_equality_uses_constant_time_compare(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The value of `==` being correct does not prove it is constant-time -- ordinary `==` would
+    # give the same booleans while leaking length/prefix timing. Assert __eq__ actually routes
+    # through hmac.compare_digest (the timing-safe primitive), which a regression to `a == b`
+    # would silently stop doing.
+    import hmac
+
+    calls: list[tuple[bytes, bytes]] = []
+    real = hmac.compare_digest
+
+    def recording(a: bytes, b: bytes) -> bool:
+        calls.append((bytes(a), bytes(b)))
+        return real(a, b)
+
+    monkeypatch.setattr("credbox.secret.hmac.compare_digest", recording)
+    assert Secret(SECRET) == Secret(SECRET)
+    assert len(calls) == 1
+    assert calls[0] == (SECRET.encode(), SECRET.encode())
+
+
 def test_equal_secrets_compare_equal() -> None:
     assert Secret(SECRET) == Secret(SECRET)
 
