@@ -132,14 +132,14 @@ class EncryptedFileBackend:
         # passphrase was a temporary argument, blob is already deleted) and no exception is in
         # flight (_try_decrypt RETURNED its outcome) -- so each error's __cause__ and __context__
         # are None and no secret-bearing crypto frame is on the traceback.
-        if outcome is _DecryptOutcome.KDF_UNAVAILABLE:
+        if outcome is _CryptoOutcome.KDF_UNAVAILABLE:
             # The build could not derive at the header's (clamped) params, though the tiny
             # availability probe passed (e.g. no thread support for lanes>1). Content-free, and
             # distinct from wrong-passphrase so the user is told to upgrade, not to doubt the pass.
             raise CredentialsError(
                 f"could not read {path}: Argon2id key derivation failed in this cryptography/OpenSSL build"
             )
-        if outcome is _DecryptOutcome.NEWER_VERSION:
+        if outcome is _CryptoOutcome.NEWER_VERSION:
             # A well-formed argon2id header carrying an unrecognized newer version -- written by a
             # newer credbox. Report that distinctly (content-free) instead of misdiagnosing it as a
             # wrong passphrase or tampering, so the user is told to upgrade rather than doubting
@@ -148,8 +148,12 @@ class EncryptedFileBackend:
             raise CredentialsError(
                 f"the store {path} was written by a newer credbox; upgrade credbox to read it"
             )
-        if not isinstance(outcome, bytes):   # _DecryptOutcome.FAILED
-            # Wrong passphrase, tampering, or a relocated blob (its bound app did not match).
+        if not isinstance(outcome, bytes):
+            # FAILED today -- and the deliberate fail-closed sink for any future non-bytes outcome:
+            # an unrecognized member is rejected here as a decrypt failure, never reaching
+            # parse_store as plaintext. (Wrong passphrase, tampering, or a relocated blob whose
+            # AAD-bound app did not match.) Keeping this positive `isinstance(bytes)` gate -- rather
+            # than an `is FAILED` check -- is what makes the fall-through safe.
             raise DecryptionError(
                 f"could not decrypt {path}: wrong passphrase or tampering"
             )
@@ -170,11 +174,14 @@ class EncryptedFileBackend:
         if isinstance(encoded, StoreFault):
             raise CredentialsError(f"{path} could not be serialized: a value is not encodable")
         blob = _encrypt(encoded, self._passphrase.reveal(), app)
-        del encoded   # drop the plaintext alias before any raise below
-        if not isinstance(blob, bytes):   # _DecryptOutcome.KDF_UNAVAILABLE
-            # The build could not derive at the write params. Raised from this frame -- the plaintext
-            # (_encrypt's local) is already off the stack because _encrypt RETURNED -- so no plaintext
-            # frame is on the traceback. Content-free, distinct from a decrypt failure.
+        del encoded   # drop the serialized-plaintext alias, which lives only in this frame
+        if not isinstance(blob, bytes):   # KDF_UNAVAILABLE
+            # The build could not derive at the write params. `_encrypt`/`_derive_key` RETURNED the
+            # signal (never raised), so the passphrase and the serialized-plaintext frame are off the
+            # traceback and `__cause__`/`__context__` are None -- as on the read path. This is NOT,
+            # however, frame-clean: unlike a read, a write inherently holds the plaintext map --
+            # `secret_value_by_name` stays bound here and in the `set`/`unset` callers -- the accepted
+            # object-level residual of a write (see FileBackend._save). Content-free message.
             raise CredentialsError(
                 f"could not write {path}: Argon2id key derivation failed in this cryptography/OpenSSL build"
             )
@@ -186,11 +193,12 @@ class EncryptedFileBackend:
 
 # --- crypto primitives ---------------------------------------------------------
 
-class _DecryptOutcome(Enum):
-    """A non-plaintext result of a decrypt/derive attempt, RETURNED (never raised) so the frames
-    that hold the passphrase (``_derive_key``) or the plaintext (``_encrypt``) are never attached
-    to an escaping exception's traceback. ``_load``/``_save`` map each to a content-free error
-    raised from their own clean frame, where no secret is bound and no exception is in flight."""
+class _CryptoOutcome(Enum):
+    """A non-plaintext result of a decrypt-or-encrypt attempt (both re-derive the key), RETURNED
+    (never raised) so the frames that hold the passphrase (``_derive_key``) or the serialized
+    plaintext (``_encrypt``) are never attached to an escaping exception's traceback. ``_load`` and
+    ``_save`` map each member to a content-free error raised from their own frame, where no
+    exception is in flight (so ``__cause__``/``__context__`` are ``None``)."""
 
     FAILED = auto()           # wrong passphrase, tampering, or a malformed/relocated blob
     NEWER_VERSION = auto()    # a well-formed header whose version this build does not understand
@@ -228,7 +236,7 @@ def _ensure_kdf_available() -> None:
 
 def _derive_key(
     passphrase: str, salt: bytes, *, time_cost: int, memory_cost: int, lanes: int
-) -> bytes | Literal[_DecryptOutcome.KDF_UNAVAILABLE]:
+) -> bytes | Literal[_CryptoOutcome.KDF_UNAVAILABLE]:
     kdf = Argon2id(
         salt=salt,
         length=_KEY_LEN,
@@ -249,17 +257,19 @@ def _derive_key(
         # not attached to any escaping exception's traceback; _load/_save turn the signal into a
         # content-free CredentialsError from their own clean frame. (Distinct from wrong-passphrase:
         # this is a build-capability failure, so the caller says "upgrade", not "wrong passphrase".)
-        return _DecryptOutcome.KDF_UNAVAILABLE
+        return _CryptoOutcome.KDF_UNAVAILABLE
 
 
 def _encrypt(
     plaintext: bytes, passphrase: str, app: str
-) -> bytes | Literal[_DecryptOutcome.KDF_UNAVAILABLE]:
+) -> bytes | Literal[_CryptoOutcome.KDF_UNAVAILABLE]:
     """Encrypt ``plaintext`` into the single-blob layout with a fresh salt and nonce. ``app`` is
     written into the header (and thus bound as AAD) so a reader can confirm the blob belongs to
-    the store it was found in -- see ``_try_decrypt``. Returns ``KDF_UNAVAILABLE`` (never raises)
-    when the build cannot derive at the write params, so this frame -- which holds ``plaintext`` --
-    is never attached to an escaping exception; ``_save`` turns the signal into a content-free error."""
+    the store it was found in -- see ``_try_decrypt``. On a build that cannot derive at the write
+    params it RETURNS ``KDF_UNAVAILABLE`` rather than raising, so the passphrase and this frame's
+    ``plaintext`` are kept off any escaping traceback for that case; ``_save`` turns the signal into
+    a content-free error. This is NOT a blanket "never raises": ``AESGCM.encrypt``/``json.dumps`` can
+    still fault with ``plaintext`` in frame -- the accepted object-level residual of a write."""
     salt = os.urandom(_SALT_LEN)
     key = _derive_key(
         passphrase, salt,
@@ -282,9 +292,9 @@ def _encrypt(
     return len(header_json).to_bytes(4, "big") + header_json + nonce + ciphertext
 
 
-def _try_decrypt(blob: bytes, passphrase: str, app: str) -> bytes | _DecryptOutcome:
+def _try_decrypt(blob: bytes, passphrase: str, app: str) -> bytes | _CryptoOutcome:
     """Parse the blob, re-derive the key from the header's own (clamped) params, and AES-GCM
-    decrypt with the header bound as AAD. Return the plaintext bytes, or a ``_DecryptOutcome``:
+    decrypt with the header bound as AAD. Return the plaintext bytes, or a ``_CryptoOutcome``:
     ``FAILED`` on any decrypt failure (a malformed blob, wrong passphrase, tampering, or a blob
     bound to a different app), ``NEWER_VERSION`` for a well-formed header whose version is newer
     than this build understands, or ``KDF_UNAVAILABLE`` when the build cannot derive at the (clamped)
@@ -298,16 +308,16 @@ def _try_decrypt(blob: bytes, passphrase: str, app: str) -> bytes | _DecryptOutc
         nonce = rest[:_NONCE_LEN]
         ciphertext = rest[_NONCE_LEN:]
         if len(header_json) != header_len or len(nonce) != _NONCE_LEN:
-            return _DecryptOutcome.FAILED
+            return _CryptoOutcome.FAILED
         header = json.loads(header_json)
         if not isinstance(header, dict) or header.get("kdf") != "argon2id":
-            return _DecryptOutcome.FAILED
+            return _CryptoOutcome.FAILED
         version = header.get("v")
         if version != 1:
             # A well-formed argon2id header with a recognizably-newer integer version was written
             # by a newer credbox; signal that distinctly. Anything else (v absent, non-int, <1) is
             # malformed and falls through to a normal decrypt failure.
-            return _DecryptOutcome.NEWER_VERSION if isinstance(version, int) and version > 1 else _DecryptOutcome.FAILED
+            return _CryptoOutcome.NEWER_VERSION if isinstance(version, int) and version > 1 else _CryptoOutcome.FAILED
         salt = base64.b64decode(header["salt"])
         time_cost = _clamp(int(header["t"]), 1, _MAX_TIME_COST)
         memory_cost = _clamp(int(header["m"]), 8 * _MAX_LANES, _MAX_MEMORY_COST_KIB)
@@ -322,7 +332,7 @@ def _try_decrypt(blob: bytes, passphrase: str, app: str) -> bytes | _DecryptOutc
         # skips the check, so the binding is additive and back-compatible.
         stored_app = header.get("app")
         if stored_app is not None and stored_app != app:
-            return _DecryptOutcome.FAILED
+            return _CryptoOutcome.FAILED
         return plaintext
     except (InvalidTag, ValueError, KeyError, TypeError, RecursionError, OverflowError,
             json.JSONDecodeError, UnicodeDecodeError):
@@ -333,7 +343,7 @@ def _try_decrypt(blob: bytes, passphrase: str, app: str) -> bytes | _DecryptOutc
         # ValueError). Only MemoryError/KeyboardInterrupt propagate: an OOM is not a malformed
         # header, so folding it to "wrong passphrase or tampering" would misclassify it, exactly as
         # _storecodec keeps its own catches narrow.
-        return _DecryptOutcome.FAILED
+        return _CryptoOutcome.FAILED
 
 
 def _clamp(value: int, low: int, high: int) -> int:

@@ -36,14 +36,23 @@ SecretsArg: TypeAlias = "str | Secret | Iterable[str | Secret]"
 
 
 def _reject_bytes_secrets(secrets: SecretsArg) -> None:
-    """Refuse a ``bytes``/``bytearray`` ``secrets`` arg, eagerly and loudly. It is ``Iterable[int]``,
-    so it slips through the best-effort bodies below, matches no ``str`` item, and redacts NOTHING --
-    a silent no-op that returns the secret-bearing text unchanged, the worst failure for a leak
-    guard. ``bytes`` is outside ``SecretsArg`` (mypy already rejects it for typed callers); this is
-    the runtime backstop for dynamically-typed ones, raised before the never-raises body so the
-    misuse surfaces instead of being swallowed."""
-    if isinstance(secrets, (bytes, bytearray)):
-        raise TypeError("scrub secrets must be str/Secret (or an iterable of them), not bytes")
+    """Refuse a binary ``secrets`` arg (``bytes``/``bytearray``/``memoryview``), eagerly and loudly.
+    Each is ``Iterable[int]``, so it slips through the best-effort bodies below, matches no ``str``
+    item, and redacts NOTHING -- a silent no-op that returns the secret-bearing text unchanged, the
+    worst failure for a leak guard. (``array('B')`` is the same but exotic; a fully general
+    ``Iterable[int]`` guard is impossible, so we name the concrete buffer types.) These are outside
+    ``SecretsArg`` (mypy already rejects them for typed callers); this is the runtime backstop for
+    dynamically-typed ones, raised before the never-raises body so the misuse surfaces.
+
+    ``from None`` because this runs inside callers' ``except`` blocks (``scrub_exception``): it sets
+    ``__suppress_context__`` so the in-flight, possibly secret-bearing exception is not RENDERED in
+    this TypeError's traceback. (It does not detach ``__context__`` -- Python keeps the object link;
+    the point is only to keep it out of the printed output, and the in-flight error is the caller's
+    own object anyway.)"""
+    if isinstance(secrets, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            "scrub secrets must be str/Secret (or an iterable of them), not bytes/bytearray/memoryview"
+        ) from None
 
 
 def scrub_secrets(text: str, secrets: SecretsArg) -> str:

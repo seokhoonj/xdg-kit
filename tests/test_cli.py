@@ -172,6 +172,38 @@ def test_doctor_discovers_and_checks_an_encrypted_only_store(
     assert "checked 1" in captured.out
 
 
+def test_doctor_checks_both_store_files_when_an_app_has_each(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An app with BOTH credentials.json and credentials.enc: doctor must check BOTH ("checked 2")
+    # and warn on EACH group-readable file -- the `insecure = warn(...) or insecure` fold must not
+    # short-circuit past the second file once the first already set insecure.
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX mode bits only")
+    from credbox import permissions
+    from credbox.backends._store import CREDENTIALS_FILE, ENCRYPTED_FILE
+    from credbox.paths import config_dir
+
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    base = config_dir("bothapp")
+    base.mkdir(parents=True, exist_ok=True)
+    os.chmod(base, stat.S_IRWXU)   # 0700 dir, so only the two FILE warnings appear
+    group_readable = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP   # 0640
+    (base / CREDENTIALS_FILE).write_text("{}")
+    os.chmod(base / CREDENTIALS_FILE, group_readable)
+    (base / ENCRYPTED_FILE).write_bytes(b"\x00opaque")
+    os.chmod(base / ENCRYPTED_FILE, group_readable)
+    capsys.readouterr()
+    assert main(["doctor"]) == 1
+    captured = capsys.readouterr()
+    assert "checked 2" in captured.out                       # both files inspected
+    assert captured.err.count("chmod 600") == 2              # BOTH warned, no short-circuit
+    assert CREDENTIALS_FILE in captured.err and ENCRYPTED_FILE in captured.err
+
+
 def test_get_resolve_consults_the_environment(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
