@@ -49,21 +49,10 @@ class _RaisingUrl:
 
 
 def test_scrub_exception_survives_a_url_property_that_raises() -> None:
+    # The raising url lives on err.request (the owner walk), distinct from test_scrub.py's
+    # raising url on the exception node itself.
     err = ValueError(f"failed {SECRET}")
     err.request = _RaisingUrl()  # type: ignore[attr-defined]
     result = scrub_exception(err, [SECRET])  # must not raise
     assert result is err
     assert SECRET not in str(err.args)
-
-
-def test_scrub_exception_walks_the_context_chain() -> None:
-    try:
-        try:
-            raise ValueError(f"inner {SECRET}")
-        except ValueError as inner:
-            raise RuntimeError("outer") from inner
-    except RuntimeError as caught:
-        err: BaseException = caught
-    scrub_exception(err, [SECRET])
-    assert err.__context__ is not None
-    assert SECRET not in str(err.__context__.args)
