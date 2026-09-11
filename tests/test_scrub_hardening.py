@@ -65,12 +65,21 @@ def test_scrub_secrets_rejects_a_bytes_arg_instead_of_silently_passing_through()
     import pytest
 
     log = f"leaking {SECRET}"
-    with pytest.raises(TypeError):
-        scrub_secrets(log, SECRET.encode())   # type: ignore[arg-type]  # the point: bytes is refused
+    for binary in (SECRET.encode(), bytearray(SECRET.encode()), memoryview(SECRET.encode())):
+        with pytest.raises(TypeError):
+            scrub_secrets(log, binary)   # type: ignore[arg-type]  # the point: binary is refused
 
 
-def test_scrub_exception_rejects_a_bytes_arg() -> None:
+def test_scrub_exception_rejects_a_bytes_arg_without_rendering_the_in_flight_secret() -> None:
     import pytest
 
-    with pytest.raises(TypeError):
-        scrub_exception(ValueError(f"leaking {SECRET}"), SECRET.encode())   # type: ignore[arg-type]
+    # Called inside an except block (the realistic scrub_exception site). The guard's `from None`
+    # sets __suppress_context__ so the in-flight, secret-bearing exception is not RENDERED in the
+    # TypeError's traceback. (Python still records __context__ as an object link -- `from None` does
+    # NOT detach it -- so we assert the suppression flag, never `__context__ is None`.)
+    try:
+        raise RuntimeError(f"in-flight {SECRET}")
+    except RuntimeError:
+        with pytest.raises(TypeError) as excinfo:
+            scrub_exception(ValueError(f"leaking {SECRET}"), SECRET.encode())   # type: ignore[arg-type]
+    assert excinfo.value.__suppress_context__ is True
