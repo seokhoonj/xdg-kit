@@ -212,9 +212,8 @@ layout selects **where the store lives**, so switching it points at a different 
 not a migration; move an existing store yourself (e.g. with `relocate_once`) if you change it.
 
 **Windows note:** `0600` and `0700` are POSIX (Linux/macOS) permission settings — credbox writes
-the secret **file** as `0600` (its owner may read and write it, nobody else) and the **folder**
-that holds it as `0700` (only its owner may enter), so no other user on the machine can reach the
-secret. Windows has no such permission bits, so credbox instead keeps secrets under your per-user
+the secret **file** as `0600` (only its owner may read and write it) and the **folder** that holds
+it as `0700` (only its owner may access it), so no other user on the machine can reach the secret. Windows has no such permission bits, so credbox instead keeps secrets under your per-user
 `%LOCALAPPDATA%` folder — which Windows already restricts to your own account — and does not claim
 the `0600`/`0700` guarantee it cannot set directly there.
 
