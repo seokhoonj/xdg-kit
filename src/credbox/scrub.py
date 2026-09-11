@@ -35,6 +35,17 @@ REDACTION = "***"
 SecretsArg: TypeAlias = "str | Secret | Iterable[str | Secret]"
 
 
+def _reject_bytes_secrets(secrets: SecretsArg) -> None:
+    """Refuse a ``bytes``/``bytearray`` ``secrets`` arg, eagerly and loudly. It is ``Iterable[int]``,
+    so it slips through the best-effort bodies below, matches no ``str`` item, and redacts NOTHING --
+    a silent no-op that returns the secret-bearing text unchanged, the worst failure for a leak
+    guard. ``bytes`` is outside ``SecretsArg`` (mypy already rejects it for typed callers); this is
+    the runtime backstop for dynamically-typed ones, raised before the never-raises body so the
+    misuse surfaces instead of being swallowed."""
+    if isinstance(secrets, (bytes, bytearray)):
+        raise TypeError("scrub secrets must be str/Secret (or an iterable of them), not bytes")
+
+
 def scrub_secrets(text: str, secrets: SecretsArg) -> str:
     """Return ``text`` with every non-empty value in ``secrets`` -- and each value's
     URL-encoded (``quote`` / ``quote_plus``) forms -- replaced by ``***``.
@@ -42,8 +53,10 @@ def scrub_secrets(text: str, secrets: SecretsArg) -> str:
     ``secrets`` may be raw ``str`` values or ``Secret``s (the natural thing to pass -- a
     ``Secret`` is revealed here, at the point of use, purely to redact it; passing one is NOT a
     silent no-op). Longer targets are replaced first, so a secret that is a prefix of another (or
-    of its own encoded form) does not leave a tail exposed. Best-effort and never raises: a
-    non-iterable ``secrets`` leaves ``text`` unchanged."""
+    of its own encoded form) does not leave a tail exposed. Best-effort and never raises on the error
+    path: a non-iterable ``secrets`` leaves ``text`` unchanged. The one eager rejection is a
+    ``bytes`` ``secrets`` (a caller type error -- see ``_reject_bytes_secrets``)."""
+    _reject_bytes_secrets(secrets)
     try:
         secret_values = _redactable_values(secrets)
     except MemoryError:
@@ -66,7 +79,9 @@ def scrub_exception(err: BaseException, secrets: SecretsArg) -> BaseException:
     guarantee ``str(err)`` is clean for an exception with a custom ``__str__`` that renders
     something other than these, so also pass the rendered log line through ``scrub_secrets``
     before emitting it. The redaction targets are computed once here and threaded through the
-    walk rather than rebuilt per field."""
+    walk rather than rebuilt per field. Like ``scrub_secrets`` it never raises on the error path,
+    save the one eager rejection of a ``bytes`` ``secrets`` arg (see ``_reject_bytes_secrets``)."""
+    _reject_bytes_secrets(secrets)
     try:
         secret_values = _redactable_values(secrets)
     except MemoryError:
