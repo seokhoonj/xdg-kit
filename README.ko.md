@@ -243,7 +243,7 @@ with single_instance("myapp", "poll") as acquired:
 | `SecretBackend` / `FileBackend` | 백엔드 프로토콜과 의존성 0 파일 백엔드. |
 | `scrub_secrets` / `scrub_exception` | 텍스트와 예외 체인에서 시크릿 값 마스킹. |
 | `single_instance` / `FileLock` | `runtime_dir`의 단일 인스턴스 잠금. |
-| `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `DecryptionError` / `MissingExtraError` | 예외 계층. |
+| `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `BlankSecretError` / `DecryptionError` / `MissingExtraError` | 예외 계층. |
 | `__version__` | 설치된 패키지 버전 문자열. |
 
 ### 빌딩 블록 (라이브러리 작성자용)
