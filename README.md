@@ -33,7 +33,7 @@ unit — not a novel vault. Directories follow the
 ```sh
 pip install credbox              # file store, zero runtime dependencies
 pip install "credbox[keyring]"   # add the optional OS keyring backend
-pip install "credbox[crypto]"     # add the optional encrypted-file backend (Argon2id + AES-GCM)
+pip install "credbox[crypto]"    # add the optional encrypted-file backend (Argon2id + AES-GCM)
 pip install "credbox[all]"       # both
 ```
 
@@ -60,8 +60,8 @@ it is set nowhere; the result is a `Secret`, so it will not land in a log by acc
 from credbox import Credentials
 
 secret = Credentials("myapp").require("API_KEY")   # a Secret, not a str
-secret.reveal()                                     # the raw value, at the point of use
-print(secret)                                       # 'API_...cdef' — masked, safe to log
+secret.reveal()                                    # the raw value, at the point of use
+print(secret)                                      # 'API_...cdef' — masked, safe to log
 ```
 
 ## 3. Secrets
@@ -213,9 +213,13 @@ not a migration; move an existing store yourself (e.g. with `relocate_once`) if 
 
 **Windows note:** `0600` and `0700` are POSIX (Linux/macOS) permission settings — credbox writes
 the secret **file** as `0600` (only its owner may read and write it) and the **folder** that holds
-it as `0700` (only its owner may access it), so no other user on the machine can reach the secret. Windows has no such permission bits, so credbox instead keeps secrets under your per-user
-`%LOCALAPPDATA%` folder — which Windows already restricts to your own account — and does not claim
-the `0600`/`0700` guarantee it cannot set directly there.
+it as `0700` (only its owner may access it), so no other user on the machine can reach the secret.
+Windows has no such Unix permission bits; it controls access with **ACLs** (Access Control Lists —
+a per-account/-group list of allow/deny entries) instead. credbox cannot set `0600`/`0700` on
+Windows, so it keeps secrets under your per-user `%LOCALAPPDATA%` folder: Windows creates that
+folder with an ACL that grants access to your account only, and files created inside inherit it, so
+they are private to your account automatically. credbox therefore does not claim the `0600`/`0700`
+guarantee it cannot set there — it relies on the ACL protection the OS already provides.
 
 ## 8. Redacting secrets from logs
 
