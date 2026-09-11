@@ -145,6 +145,33 @@ def test_doctor_with_no_apps_reports_zero(capsys: pytest.CaptureFixture[str]) ->
     assert "checked 0" in capsys.readouterr().out
 
 
+def test_doctor_discovers_and_checks_an_encrypted_only_store(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An app with only a credentials.enc (no credentials.json) must still be discovered and have
+    # its permissions checked -- otherwise an encrypted-store-only user gets a false clean bill.
+    # doctor only stat()s the file, never decrypts, so the test needs no passphrase or crypto extra.
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX mode bits only")
+    from credbox import permissions
+    from credbox.backends._store import ENCRYPTED_FILE
+    from credbox.paths import config_dir
+
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    enc = config_dir("encapp") / ENCRYPTED_FILE
+    enc.parent.mkdir(parents=True, exist_ok=True)
+    enc.write_bytes(b"\x00opaque-ciphertext")   # doctor never decrypts it
+    os.chmod(enc, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)   # 0640: group-readable
+    capsys.readouterr()
+    assert main(["doctor"]) == 1   # discovered via credentials.enc, flagged insecure
+    captured = capsys.readouterr()
+    assert "chmod 600" in captured.err
+    assert "checked 1" in captured.out
+
+
 def test_get_resolve_consults_the_environment(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from credbox._storecodec import StoreFault, StoreFaultKind, parse_store, serialize_store
 from credbox.atomic import write_bytes_atomic
-from credbox.backends._store import exclusive_store_lock, normalize_secret_value
+from credbox.backends._store import CREDENTIALS_FILE, exclusive_store_lock, normalize_secret_value
 from credbox.errors import CredBoxError, CredentialsError
 from credbox.paths import config_dir
 from credbox.permissions import (
@@ -24,8 +24,6 @@ from credbox.permissions import (
 from credbox.secret import Secret
 
 __all__ = ["FileBackend"]
-
-CREDENTIALS_FILE = "credentials.json"
 
 
 class FileBackend:

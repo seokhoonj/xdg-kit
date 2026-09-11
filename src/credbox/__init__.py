@@ -43,6 +43,7 @@ from credbox.permissions import (
     ensure_dir,
     ensure_private_dir,
     restrict_dir_to_owner,
+    warn_if_group_or_world_accessible,
     warn_if_group_or_world_readable,
 )
 from credbox.relocation import relocate_once
@@ -93,6 +94,7 @@ __all__ = [
     "ensure_private_dir",
     "restrict_dir_to_owner",
     "warn_if_group_or_world_readable",
+    "warn_if_group_or_world_accessible",
     "runtime_dir",
     "FileLock",
     "single_instance",
