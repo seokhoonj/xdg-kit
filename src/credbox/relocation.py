@@ -17,8 +17,10 @@ from credbox.errors import CredBoxError
 __all__ = ["relocate_once"]
 
 
-def relocate_once(old: Path, new: Path) -> bool:
+def relocate_once(*, old: Path, new: Path) -> bool:
     """Move ``old`` to ``new`` atomically, exactly once, and report whether this call did it.
+    ``old`` and ``new`` are keyword-only: they are same-type ``Path``s and this is a destructive
+    replace, so a positional transposition would reverse the move -- the keywords forbid it.
 
     Returns ``True`` when ``old`` existed and was moved onto ``new`` (replacing ``new`` if it
     was present); ``False`` when ``old`` does not exist -- already relocated or never there --

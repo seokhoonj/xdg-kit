@@ -250,7 +250,7 @@ one — which redo work, produce duplicates, and race on shared state:
 ```python
 from credbox import single_instance, FileLock
 
-with single_instance("myapp", "poll") as acquired:
+with single_instance("myapp", name="poll") as acquired:
     if not acquired:
         return   # another run holds the lock; skip rather than pile on
     ...
@@ -271,7 +271,7 @@ The lock lives in `runtime_dir` and is released by the OS when the process exits
 | `SecretBackend` / `FileBackend` | The backend protocol and the zero-dep file backend. |
 | `scrub_secrets` / `scrub_exception` | Redact secret values from text and exception chains. |
 | `single_instance` / `FileLock` | Single-instance advisory locking in `runtime_dir`. |
-| `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `BlankSecretError` / `DecryptionError` / `MissingExtraError` | The exception hierarchy. |
+| `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `InvalidLayoutError` / `BlankSecretError` / `LockHeldError` / `DecryptionError` / `MissingExtraError` | The exception hierarchy. |
 | `__version__` | The installed package version string. |
 
 ### Building blocks (for library authors)

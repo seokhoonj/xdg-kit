@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 from credbox.environment import env_value
+from credbox.errors import InvalidLayoutError
 
 __all__ = ["Layout", "default_layout", "set_default_layout"]
 
@@ -39,5 +40,5 @@ def set_default_layout(layout: Layout) -> None:
     ``CREDBOX_LAYOUT`` env value still overrides this."""
     global _override
     if layout not in ("xdg", "native"):
-        raise ValueError(f"layout must be 'xdg' or 'native', not {layout!r}")
+        raise InvalidLayoutError(f"layout must be 'xdg' or 'native', not {layout!r}")
     _override = layout

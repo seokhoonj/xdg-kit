@@ -15,7 +15,9 @@ __all__ = [
     "NoKeyringError",
     "InsecureStorageError",
     "InvalidAppNameError",
+    "InvalidLayoutError",
     "BlankSecretError",
+    "LockHeldError",
     "DecryptionError",
     "MissingExtraError",
 ]
@@ -50,12 +52,29 @@ class InvalidAppNameError(CredBoxError, ValueError):
     error (exit 2)."""
 
 
+class InvalidLayoutError(CredBoxError, ValueError):
+    """A layout other than ``"xdg"`` or ``"native"`` was passed to ``set_default_layout``. Also a
+    ``ValueError`` -- an off-vocabulary literal is a caller mistake -- so an ``except ValueError``
+    still catches it, mirroring ``InvalidAppNameError``. (The ``layout`` parameter is typed
+    ``Literal["xdg", "native"]``, so a type-checked caller cannot reach this; it is the runtime
+    backstop for a dynamically-built value.)"""
+
+
 class BlankSecretError(CredBoxError, ValueError):
     """A blank or whitespace-only secret name or value was passed to ``Credentials.set``. A blank
     value would list under ``names`` yet resolve to ``None`` (blanks read as absent); a blank name
     is unresolvable -- both are refused to keep ``set`` and ``get`` consistent. Also a
     ``ValueError`` -- a blank is a caller mistake -- so an ``except ValueError`` catches it too,
     mirroring ``InvalidAppNameError``."""
+
+
+class LockHeldError(CredBoxError):
+    """Another process already holds the ``FileLock`` a ``with FileLock(...)`` block tried to take.
+    The context-manager form treats "not acquired" as an error so protected work never runs
+    unguarded; use ``single_instance(app, name=...)`` instead when the intent is to skip -- it
+    yields ``False`` rather than raising. Distinct from the ``CredBoxError`` that ``acquire`` raises
+    when the lock file cannot be opened, so a caller can tell contention (normal, skip) from a
+    broken environment."""
 
 
 class DecryptionError(CredBoxError):

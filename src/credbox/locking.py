@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from typing import IO
 
 from credbox._oslock import lock_exclusive, unlock
-from credbox.errors import CredBoxError
+from credbox.errors import CredBoxError, LockHeldError
 from credbox.paths import app_dir_segment
 from credbox.runtime import runtime_dir
 
@@ -30,15 +30,22 @@ __all__ = [
 
 class FileLock:
     """An exclusive, non-blocking advisory lock named ``name`` for ``app``, held on a file in
-    ``runtime_dir(app)``. Acquire it, check ``acquired``, and release it -- or use it as a
-    context manager. Re-acquiring or releasing when not held is safe."""
+    ``runtime_dir(app)``.
 
-    acquired: bool   # whether this lock is currently held (public: callers read it)
+    Two ways to use it, with DIFFERENT contention semantics:
+    - ``acquire()`` / ``release()`` explicitly, reading the ``acquired`` result to decide whether
+      to proceed; or
+    - as a context manager, which raises ``LockHeldError`` if another process holds it -- so the
+      ``with`` body never runs unguarded. When the intent is to *skip* a contended run rather than
+      error, use ``single_instance(app, name=...)``, which yields ``False`` instead of raising.
 
-    def __init__(self, app: str, name: str) -> None:
+    Re-acquiring or releasing when not held is safe."""
+
+    def __init__(self, app: str, *, name: str) -> None:
         """Bind to an ``app`` and a lock ``name``. Both are validated as safe path segments
         here (fail-fast), so a crafted ``name`` such as ``"../escape"`` cannot place the
-        ``.lock`` file outside the runtime directory.
+        ``.lock`` file outside the runtime directory. ``name`` is keyword-only so it cannot be
+        transposed with ``app`` (two same-type strings) into a lock on the wrong path.
 
         Raises:
             InvalidAppNameError: ``app`` or ``name`` is not a valid directory segment.
@@ -46,7 +53,12 @@ class FileLock:
         self._app = app_dir_segment(app)
         self._name = app_dir_segment(name)
         self._handle: IO[str] | None = None
-        self.acquired = False
+
+    @property
+    def acquired(self) -> bool:
+        """Whether this lock is currently held. Derived from the open handle -- the single source
+        of truth -- so it cannot be set to a value the handle contradicts."""
+        return self._handle is not None
 
     def __repr__(self) -> str:
         return f"FileLock(app={self._app!r}, name={self._name!r}, acquired={self.acquired})"
@@ -72,17 +84,14 @@ class FileLock:
             handle.close()
             return False   # another process holds it
         self._handle = handle
-        self.acquired = True
         return True
 
     def release(self) -> None:
         """Release the lock and close its file. A no-op when not held. Best-effort and never
         raises: closing the handle frees the OS lock regardless, so a failing ``unlock`` (e.g.
-        ENOLCK on a degraded mount) is swallowed. State is cleared FIRST so it is always
-        consistent -- otherwise a later ``acquire`` would short-circuit on a stale
-        ``acquired=True`` and report "held" without re-taking the now-released OS lock."""
+        ENOLCK on a degraded mount) is swallowed. ``self._handle`` is cleared FIRST so ``acquired``
+        (derived from it) never reports "held" over a handle that is already being released."""
         handle = self._handle
-        self.acquired = False
         self._handle = None
         if handle is not None:
             try:
@@ -93,7 +102,13 @@ class FileLock:
                 handle.close()
 
     def __enter__(self) -> FileLock:
-        self.acquire()
+        """Take the lock for the ``with`` block, or raise ``LockHeldError`` if another process
+        holds it -- so the body never runs without the lock. Use ``single_instance`` to skip
+        (yield ``False``) instead of raising."""
+        if not self.acquire():
+            raise LockHeldError(
+                f"another process holds the lock {self._name!r} for {self._app!r}"
+            )
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -101,16 +116,18 @@ class FileLock:
 
 
 @contextmanager
-def single_instance(app: str, name: str) -> Iterator[bool]:
+def single_instance(app: str, *, name: str) -> Iterator[bool]:
     """Hold a ``FileLock`` for the block and yield whether it was acquired -- ``True`` to
     proceed, ``False`` when another process already holds it (the caller should skip its run).
-    Convenience over ``FileLock``.
+    Convenience over ``FileLock``; unlike ``with FileLock(...)`` it does NOT raise on contention,
+    so the caller decides what to do. ``name`` is keyword-only so it cannot be transposed with
+    ``app``.
 
     Raises:
         InvalidAppNameError: ``app`` or ``name`` is not a valid directory segment.
         CredBoxError / InsecureStorageError: propagated from ``runtime_dir``.
     """
-    lock = FileLock(app, name)
+    lock = FileLock(app, name=name)
     acquired = lock.acquire()
     try:
         yield acquired
