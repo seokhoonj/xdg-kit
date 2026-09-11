@@ -279,9 +279,22 @@ The lock lives in `runtime_dir` and is released by the OS when the process exits
 | `ensure_dir` / `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` | Directory/file permission guarantees and checks. |
 | `write_bytes_atomic` / `write_text_atomic` | Atomic 0600 writes. |
 | `read_json` / `relocate_once` | Corruption-aware non-secret state read; idempotent, fail-closed relocation. |
-| `env_var_prefix` / `colliding_env_var_prefixes` / `read_absolute_path_override` | App-name env folding and an absolute-path override. |
+| `env_var_prefix` / `colliding_env_var_prefixes` / `read_absolute_path_override` | Turn an app name into an env-var prefix and detect prefix collisions; read an absolute-path override. |
 | `app_dir_segment` / `Layout` / `default_layout` / `set_default_layout` | Validate an app name; select the path layout. |
 
-## 11. License
+## 11. For library authors
+
+credbox provides only the base layer — directories, secret resolution, permissions, atomic writes,
+locking, masking. Your package keeps its own domain configuration (accounts, routes, topics) and
+reaches under it for just the storage location and the secrets:
+
+```python
+from credbox import Credentials, config_dir
+
+settings = config_dir("myapp") / "settings.toml"     # your own config file — you manage it
+token    = Credentials("myapp").secret("API_TOKEN")  # credbox owns only the location and the secret
+```
+
+## 12. License
 
 [MIT](LICENSE)
