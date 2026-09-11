@@ -278,7 +278,7 @@ The lock lives in `runtime_dir` and is released by the OS when the process exits
 
 | Import | What it is |
 |--------|------------|
-| `ensure_dir` / `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` | Directory/file permission guarantees and checks. |
+| `ensure_dir` / `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` / `warn_if_group_or_world_accessible` | Directory/file permission guarantees and checks (the last two warn when a credentials file or its directory is reachable beyond its owner). |
 | `write_bytes_atomic` / `write_text_atomic` | Atomic 0600 writes. |
 | `read_json` / `relocate_once` | Corruption-aware non-secret state read; idempotent, fail-closed relocation. |
 | `env_var_prefix` / `colliding_env_var_prefixes` / `read_absolute_path_override` | Turn an app name into an env-var prefix and detect prefix collisions; read an absolute-path override. |

@@ -29,15 +29,13 @@ from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from credbox._storecodec import StoreFault, parse_store, serialize_store
 from credbox.atomic import write_bytes_atomic
-from credbox.backends._store import exclusive_store_lock, normalize_secret_value
+from credbox.backends._store import ENCRYPTED_FILE, exclusive_store_lock, normalize_secret_value
 from credbox.errors import CredBoxError, CredentialsError, DecryptionError
 from credbox.paths import config_dir
-from credbox.permissions import PRIVATE_FILE_MODE
+from credbox.permissions import PRIVATE_FILE_MODE, warn_if_group_or_world_readable
 from credbox.secret import Secret
 
 __all__ = ["EncryptedFileBackend"]
-
-ENCRYPTED_FILE = "credentials.enc"
 
 _KEY_LEN = 32
 _NONCE_LEN = 12
@@ -124,6 +122,10 @@ class EncryptedFileBackend:
             return {}
         except OSError as err:
             raise CredentialsError(f"could not read {path}: {err}") from err
+        # The file is ciphertext, but a group/world-readable .enc still invites an offline
+        # passphrase attack, so nudge the owner to tighten it -- as the file backend does for its
+        # plaintext store. Names the path only (not a secret), so it is safe before any reveal.
+        warn_if_group_or_world_readable(path, app=app)
         outcome = _try_decrypt(blob, self._passphrase.reveal(), app)
         del blob
         # Every raise below fires from THIS frame -- where no passphrase/plaintext is bound (the

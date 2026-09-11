@@ -14,17 +14,20 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from credbox import __version__
 from credbox.backends import FileBackend, default_backend
+from credbox.backends._store import CREDENTIALS_FILE, ENCRYPTED_FILE
 from credbox.credentials import Credentials
 from credbox.errors import CredBoxError, InvalidAppNameError, MissingExtraError
 from credbox.paths import app_dir_segment, cache_dir, config_dir, data_dir, state_dir
-from credbox.permissions import warn_if_group_or_world_readable
+from credbox.permissions import (
+    warn_if_group_or_world_accessible,
+    warn_if_group_or_world_readable,
+)
 from credbox.runtime import runtime_dir
 from credbox.secret import mask_secret
 
@@ -207,29 +210,41 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     checked = 0
     insecure = False
     for app in apps:
-        path = FileBackend().path(app)
-        if path.exists():
+        store_files = [p for p in _store_paths(app) if p.exists()]
+        if not store_files:
+            continue
+        for path in store_files:
             checked += 1
-            # OR (not short-circuit) so both the file and dir warnings always print.
-            file_bad = warn_if_group_or_world_readable(path, app=app)
-            dir_bad = _warn_if_dir_group_or_world_accessible(config_dir(app), app=app)
-            insecure = insecure or file_bad or dir_bad
+            # OR (not short-circuit) so every file and the dir warning always print.
+            insecure = warn_if_group_or_world_readable(path, app=app) or insecure
+        # The config dir holds every store file for this app; check it once.
+        insecure = warn_if_group_or_world_accessible(config_dir(app), app=app) or insecure
     print(f"checked {checked} credentials file(s)")
     # Exit 1 when anything was found accessible beyond its owner, so a CI/monitoring gate can key
     # off the exit code; 0 when every checked file/dir is owner-only.
     return 1 if insecure else 0
 
 
+def _store_paths(app: str) -> list[Path]:
+    """Every on-disk store file ``app`` may have: the plaintext ``credentials.json`` and the
+    encrypted ``credentials.enc``. ``doctor`` must inspect both -- an encrypted-store-only user
+    would otherwise get a false clean bill from a security-diagnostic command."""
+    base = config_dir(app)
+    return [base / CREDENTIALS_FILE, base / ENCRYPTED_FILE]
+
+
 def _discover_apps() -> list[str]:
     """App names that have a credentials file under the config base -- the immediate
-    subdirectories of the config home that contain a ``credentials.json``. A subdirectory whose
-    name is not a valid app segment is skipped, so one stray neighbour cannot abort the sweep."""
+    subdirectories of the config home that contain a ``credentials.json`` OR a ``credentials.enc``.
+    A subdirectory whose name is not a valid app segment is skipped, so one stray neighbour cannot
+    abort the sweep."""
     config_base = config_dir("credbox").parent   # the XDG config home itself
     if not config_base.is_dir():
         return []
     discovered_apps = []
     for child in config_base.iterdir():
-        if not (child.is_dir() and (child / "credentials.json").is_file()):
+        if not (child.is_dir() and ((child / CREDENTIALS_FILE).is_file()
+                                    or (child / ENCRYPTED_FILE).is_file())):
             continue
         try:
             app_dir_segment(child.name)
@@ -237,25 +252,6 @@ def _discover_apps() -> list[str]:
             continue
         discovered_apps.append(child.name)
     return sorted(discovered_apps)
-
-
-def _warn_if_dir_group_or_world_accessible(directory: Path, *, app: str) -> bool:
-    """Warn on stderr when the config directory holding a credentials file is reachable by group
-    or others -- it should be mode 0700. Returns whether it is insecure. POSIX-only, best-effort."""
-    if os.name != "posix" or not directory.is_dir():
-        return False
-    try:
-        mode = directory.stat().st_mode
-    except OSError:
-        return False
-    if not mode & 0o077:
-        return False
-    print(
-        f"{app}: warning: {directory} is accessible by group/other; "
-        f"restrict it with 'chmod 700'",
-        file=sys.stderr,
-    )
-    return True
 
 
 if __name__ == "__main__":

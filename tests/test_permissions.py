@@ -11,6 +11,7 @@ from credbox.errors import InsecureStorageError
 from credbox.permissions import (
     ensure_private_dir,
     restrict_dir_to_owner,
+    warn_if_group_or_world_accessible,
     warn_if_group_or_world_readable,
 )
 
@@ -37,6 +38,33 @@ def test_no_warning_when_private(tmp_path, capsys, monkeypatch):
     secret.write_text("{}")
     os.chmod(secret, 0o600)
     warn_if_group_or_world_readable(secret, app="nw")
+    assert capsys.readouterr().err == ""
+
+
+@posix_only
+def test_warn_if_dir_accessible_warns_once_and_recommends_chmod_700(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    loose = tmp_path / "holder"
+    loose.mkdir()
+    os.chmod(loose, 0o755)   # group/other can traverse -- should be 0700
+    assert warn_if_group_or_world_accessible(loose, app="nw") is True
+    assert warn_if_group_or_world_accessible(loose, app="nw") is True   # second call stays quiet
+    err = capsys.readouterr().err
+    assert err.count("chmod 700") == 1   # the dir guard recommends 700, not the file's 600
+    assert "nw: warning" in err
+
+
+@posix_only
+def test_warn_if_dir_accessible_silent_on_private_dir_or_non_dir(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    private = tmp_path / "holder"
+    private.mkdir()
+    os.chmod(private, 0o700)
+    assert warn_if_group_or_world_accessible(private, app="nw") is False
+    a_file = tmp_path / "credentials.json"
+    a_file.write_text("{}")
+    os.chmod(a_file, 0o777)
+    assert warn_if_group_or_world_accessible(a_file, app="nw") is False   # not a directory -> skip
     assert capsys.readouterr().err == ""
 
 

@@ -32,6 +32,7 @@ __all__ = [
     "PRIVATE_FILE_MODE",
     "PRIVATE_DIR_MODE",
     "warn_if_group_or_world_readable",
+    "warn_if_group_or_world_accessible",
     "ensure_dir",
     "ensure_private_dir",
     "restrict_dir_to_owner",
@@ -45,20 +46,36 @@ _warn_lock = threading.Lock()
 
 
 def warn_if_group_or_world_readable(path: Path, *, app: str) -> bool:
-    """Return whether ``path`` is readable by group or others (insecure -- a secret file should be
-    mode 0600), and warn on stderr the first time each path is seen so the message is not repeated.
-    The RETURN reflects the actual permission state on every call (so a caller like ``doctor`` can
-    key an exit code off it), independent of the once-per-path print. POSIX-only and best-effort:
-    on a non-POSIX OS or a ``stat`` failure it returns ``False``. ``app`` names the program in the
-    message so the warning reads in its voice."""
+    """Return whether the credentials *file* ``path`` is readable by group or others (insecure -- a
+    secret file should be mode 0600), warning once per path. See ``_warn_if_permissive`` for the
+    shared contract (POSIX-only, best-effort, warn-once, return reflects the live state)."""
     if os.name != "posix":
         return False
+    return _warn_if_permissive(path, app=app, chmod="600")
+
+
+def warn_if_group_or_world_accessible(directory: Path, *, app: str) -> bool:
+    """Return whether the config *directory* holding a credentials file is reachable by group or
+    others (insecure -- it should be mode 0700), warning once per path. The directory sibling of
+    ``warn_if_group_or_world_readable``: same POSIX-only, best-effort, warn-once contract, so the
+    ``& 0o077`` policy lives in one place instead of being re-authored by each caller."""
+    if os.name != "posix" or not directory.is_dir():
+        return False
+    return _warn_if_permissive(directory, app=app, chmod="700")
+
+
+def _warn_if_permissive(path: Path, *, app: str, chmod: str) -> bool:
+    """Shared core of the two warn-if-* guards. Return whether ``path`` is accessible beyond its
+    owner (``& 0o077``), printing a ``chmod <chmod>`` nudge the first time each path is seen. The
+    RETURN reflects the actual permission state on every call (so a caller like ``doctor`` can key
+    an exit code off it), independent of the once-per-path print. A ``stat`` failure returns
+    ``False``. ``app`` names the program so the warning reads in its voice."""
     try:
         mode = path.stat().st_mode
     except OSError:
         return False
     if not mode & 0o077:
-        return False   # safe file: the common case takes no lock, so reads never serialize
+        return False   # safe path: the common case takes no lock, so reads never serialize
     # Insecure. Record-and-print under the lock so two threads seeing the same permissive path
     # cannot both print, but return True regardless of whether this call was the one that printed.
     key = str(path)
@@ -66,9 +83,9 @@ def warn_if_group_or_world_readable(path: Path, *, app: str) -> bool:
         already_warned = key in _warned_permissive_paths
         _warned_permissive_paths.add(key)
     if not already_warned:
-        # A file path is not a secret value; the warning names it so the user can fix it.
+        # A file/dir path is not a secret value; the warning names it so the user can fix it.
         print(
-            f"{app}: warning: {path} is accessible by group/other; restrict it with 'chmod 600'",
+            f"{app}: warning: {path} is accessible by group/other; restrict it with 'chmod {chmod}'",
             file=sys.stderr,
         )
     return True

@@ -250,7 +250,7 @@ with single_instance("myapp", "poll") as acquired:
 
 | Import | 설명 |
 |--------|------|
-| `ensure_dir` / `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` | 디렉터리·파일 권한 보장과 점검. |
+| `ensure_dir` / `ensure_private_dir` / `restrict_dir_to_owner` / `warn_if_group_or_world_readable` / `warn_if_group_or_world_accessible` | 디렉터리·파일 권한 보장과 점검(뒤 둘은 credentials 파일이나 그 디렉터리가 소유자 밖에서 접근 가능하면 경고). |
 | `write_bytes_atomic` / `write_text_atomic` | 원자적 0600 쓰기. |
 | `read_json` / `relocate_once` | 손상에 안전한 비-시크릿 상태 읽기; 여러 번 호출해도 안전한 재배치. |
 | `env_var_prefix` / `colliding_env_var_prefixes` / `read_absolute_path_override` | 앱 이름을 환경변수 접두어로 변환·충돌 검사; 절대경로 오버라이드 읽기. |

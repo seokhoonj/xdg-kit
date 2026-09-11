@@ -24,7 +24,13 @@ from typing import IO
 from credbox._oslock import lock_exclusive, unlock
 from credbox.permissions import restrict_dir_to_owner
 
-__all__ = ["normalize_secret_value", "exclusive_store_lock"]
+__all__ = ["normalize_secret_value", "exclusive_store_lock", "CREDENTIALS_FILE", "ENCRYPTED_FILE"]
+
+# The on-disk store file names, one per file-based backend. Defined here -- the crypto-free shared
+# home -- so a caller that only needs to LOCATE a store (e.g. the CLI `doctor` sweep) can name the
+# encrypted store without importing the [crypto]-gated `encrypted` module.
+CREDENTIALS_FILE = "credentials.json"   # file backend (plaintext)
+ENCRYPTED_FILE = "credentials.enc"      # encrypted backend ([crypto])
 
 
 def normalize_secret_value(value: object) -> str | None:

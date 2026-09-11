@@ -340,6 +340,31 @@ def test_malformed_decrypted_store_leaves_no_plaintext_on_the_traceback(
     assert leaked == [], f"decrypted plaintext retained on the traceback: {leaked}"
 
 
+def test_load_warns_on_a_group_readable_encrypted_store(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The file is ciphertext, but a group/world-readable .enc still invites an offline passphrase
+    # attack, so _load nudges the owner to tighten it -- as the file backend does for its plaintext
+    # store. The warning names only the path (no secret).
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX mode bits only")
+    from credbox import permissions
+
+    monkeypatch.setattr(permissions, "_warned_permissive_paths", set())
+    backend = _backend()
+    backend.set("myapp", "api_key", value=SECRET)
+    path = backend.path("myapp")
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)   # 0640: group-readable
+    capsys.readouterr()
+    backend.get("myapp", "api_key")
+    err = capsys.readouterr().err
+    assert "chmod 600" in err
+    assert SECRET not in err   # the nudge names the path, never the secret
+
+
 def test_each_encryption_uses_a_fresh_nonce() -> None:
     backend = _backend()
     backend.set("myapp", "k", value="v1")
