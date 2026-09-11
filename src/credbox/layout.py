@@ -29,7 +29,6 @@ def default_layout() -> Layout:
             return "xdg"
         if candidate == "native":
             return "native"
-        # malformed -> ignore, fall through (never raise)
     if _override is not None:
         return _override
     return "xdg"

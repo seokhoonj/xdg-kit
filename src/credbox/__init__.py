@@ -53,8 +53,12 @@ from credbox.secret import Secret, mask_secret
 
 try:
     __version__ = _version("credbox")
-except PackageNotFoundError:   # running from a source tree that is not installed as "credbox"
-    __version__ = "0.1.0"
+except PackageNotFoundError:
+    # Running from a source tree not installed as "credbox". The real version lives in the
+    # distribution metadata (read above); this fallback must NOT duplicate a release number, or a
+    # source-tree run would report a plausible-but-stale version once the released one moves on. A
+    # PEP 440 local-version label makes it unmistakably "not a release".
+    __version__ = "0+unknown"
 
 __all__ = [
     "__version__",

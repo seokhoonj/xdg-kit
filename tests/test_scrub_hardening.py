@@ -56,3 +56,21 @@ def test_scrub_exception_survives_a_url_property_that_raises() -> None:
     result = scrub_exception(err, [SECRET])  # must not raise
     assert result is err
     assert SECRET not in str(err.args)
+
+
+def test_scrub_secrets_rejects_a_bytes_arg_instead_of_silently_passing_through() -> None:
+    # A bytes `secrets` is Iterable[int], so without the eager guard it would match no str item,
+    # redact nothing, and return the secret-bearing log verbatim -- a silent no-op on a leak guard.
+    # It must raise loudly (and BEFORE the never-raises body swallows it) so the misuse surfaces.
+    import pytest
+
+    log = f"leaking {SECRET}"
+    with pytest.raises(TypeError):
+        scrub_secrets(log, SECRET.encode())   # type: ignore[arg-type]  # the point: bytes is refused
+
+
+def test_scrub_exception_rejects_a_bytes_arg() -> None:
+    import pytest
+
+    with pytest.raises(TypeError):
+        scrub_exception(ValueError(f"leaking {SECRET}"), SECRET.encode())   # type: ignore[arg-type]

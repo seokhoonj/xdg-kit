@@ -87,9 +87,9 @@ class EncryptedFileBackend:
         """
         raw = value.reveal() if isinstance(value, Secret) else value
         with exclusive_store_lock(self.path(app)):
-            store = self._load(app)
-            store[name] = raw
-            self._save(app, store)
+            secret_value_by_name = self._load(app)
+            secret_value_by_name[name] = raw
+            self._save(app, secret_value_by_name)
 
     def unset(self, app: str, name: str) -> None:
         """Remove ``name`` if present; an idempotent no-op when absent. Re-encrypts under the
@@ -100,10 +100,10 @@ class EncryptedFileBackend:
             CredentialsError: the store is unreadable, or the write failed.
         """
         with exclusive_store_lock(self.path(app)):
-            store = self._load(app)
-            if name in store:
-                del store[name]
-                self._save(app, store)
+            secret_value_by_name = self._load(app)
+            if name in secret_value_by_name:
+                del secret_value_by_name[name]
+                self._save(app, secret_value_by_name)
 
     def names(self, app: str) -> list[str]:
         """The stored key names, sorted -- never the values.
@@ -163,10 +163,10 @@ class EncryptedFileBackend:
             raise CredentialsError(f"the decrypted store {path} is malformed")
         return result
 
-    def _save(self, app: str, store: dict[str, str]) -> None:
+    def _save(self, app: str, secret_value_by_name: dict[str, str]) -> None:
         _ensure_kdf_available()   # before any passphrase.reveal(), so an unsupported build is content-free
         path = self.path(app)
-        encoded = serialize_store(store)
+        encoded = serialize_store(secret_value_by_name)
         if isinstance(encoded, StoreFault):
             raise CredentialsError(f"{path} could not be serialized: a value is not encodable")
         blob = _encrypt(encoded, self._passphrase.reveal(), app)
