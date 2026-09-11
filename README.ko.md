@@ -44,8 +44,8 @@ credbox set myapp API_KEY
 from credbox import Credentials
 
 secret = Credentials("myapp").require("API_KEY")   # str이 아니라 Secret
-secret.reveal()                                     # 실제 값 — 쓰는 자리에서만
-print(secret)                                       # 'API_...cdef' — 마스킹되어 로그에 안전
+secret.reveal()                                    # 실제 값 — 쓰는 자리에서만
+print(secret)                                      # 'API_...cdef' — 마스킹되어 로그에 안전
 ```
 
 ## 3. 시크릿

@@ -33,7 +33,7 @@ unit — not a novel vault. Directories follow the
 ```sh
 pip install credbox              # file store, zero runtime dependencies
 pip install "credbox[keyring]"   # add the optional OS keyring backend
-pip install "credbox[crypto]"     # add the optional encrypted-file backend (Argon2id + AES-GCM)
+pip install "credbox[crypto]"    # add the optional encrypted-file backend (Argon2id + AES-GCM)
 pip install "credbox[all]"       # both
 ```
 
@@ -60,8 +60,8 @@ it is set nowhere; the result is a `Secret`, so it will not land in a log by acc
 from credbox import Credentials
 
 secret = Credentials("myapp").require("API_KEY")   # a Secret, not a str
-secret.reveal()                                     # the raw value, at the point of use
-print(secret)                                       # 'API_...cdef' — masked, safe to log
+secret.reveal()                                    # the raw value, at the point of use
+print(secret)                                      # 'API_...cdef' — masked, safe to log
 ```
 
 ## 3. Secrets
