@@ -61,5 +61,14 @@ def test_valid_env_overrides_set_default(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_set_default_layout_rejects_an_unknown_value() -> None:
+    from credbox.errors import CredBoxError, InvalidLayoutError
+
+    # The rejection is InvalidLayoutError -- a (CredBoxError, ValueError) subclass -- so it is
+    # caught by BOTH the package-wide `except CredBoxError` surface (errors.py's contract: "every
+    # error credbox raises on purpose derives from CredBoxError") and a plain `except ValueError`.
+    with pytest.raises(InvalidLayoutError):
+        set_default_layout("cloud")  # type: ignore[arg-type]
+    with pytest.raises(CredBoxError):
+        set_default_layout("cloud")  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         set_default_layout("cloud")  # type: ignore[arg-type]

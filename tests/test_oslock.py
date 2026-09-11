@@ -72,16 +72,21 @@ def test_blocking_waits_until_holder_releases(tmp_path):
         assert holding.wait(timeout=5)   # child now holds the lock
         parent = path.open("a+")
         acquired = threading.Event()
+        outcome: dict[str, bool] = {}
 
         def block() -> None:
             lock_exclusive(parent, blocking=True)   # must wait here while the child holds it
+            # The child unlocks ONLY after `release` is set, and we can acquire only after that
+            # unlock -- so if the blocking acquire genuinely waited, `release` is already set the
+            # instant it returns. This is a deterministic ordering proof, not a wall-clock race.
+            outcome["release_was_set_on_acquire"] = release.is_set()
             acquired.set()
 
         waiter = threading.Thread(target=block)
         waiter.start()
-        assert not acquired.wait(timeout=0.5)   # still blocked -- the lock is held elsewhere
-        release.set()                            # let the child release
-        assert acquired.wait(timeout=5)          # the blocking acquire now completes
+        release.set()                     # let the child release; only then can the waiter acquire
+        assert acquired.wait(timeout=5)   # generous: guards against a hang, not a scheduling race
+        assert outcome["release_was_set_on_acquire"] is True   # proof it did not acquire early
         waiter.join()
         unlock(parent)
         parent.close()

@@ -16,21 +16,21 @@ def test_relocate_moves_source_and_reports_true(tmp_path: Path) -> None:
     old = tmp_path / "old.json"
     old.write_text("payload")
     new = tmp_path / "sub" / "new.json"
-    assert relocate_once(old, new) is True
+    assert relocate_once(old=old, new=new) is True
     assert not old.exists()
     assert new.read_text() == "payload"
 
 
 def test_relocate_missing_source_reports_false(tmp_path: Path) -> None:
-    assert relocate_once(tmp_path / "absent", tmp_path / "new") is False
+    assert relocate_once(old=tmp_path / "absent", new=tmp_path / "new") is False
 
 
 def test_relocate_is_idempotent_on_second_call(tmp_path: Path) -> None:
     old = tmp_path / "old"
     old.write_text("x")
     new = tmp_path / "new"
-    assert relocate_once(old, new) is True
-    assert relocate_once(old, new) is False   # already relocated -> no-op
+    assert relocate_once(old=old, new=new) is True
+    assert relocate_once(old=old, new=new) is False   # already relocated -> no-op
 
 
 def test_relocate_replaces_an_existing_target(tmp_path: Path) -> None:
@@ -38,7 +38,7 @@ def test_relocate_replaces_an_existing_target(tmp_path: Path) -> None:
     old.write_text("fresh")
     new = tmp_path / "new"
     new.write_text("stale")
-    assert relocate_once(old, new) is True
+    assert relocate_once(old=old, new=new) is True
     assert new.read_text() == "fresh"
 
 
@@ -54,7 +54,7 @@ def test_relocate_across_filesystems_raises_rather_than_copying(
 
     monkeypatch.setattr("credbox.relocation.os.replace", _exdev)
     with pytest.raises(CredBoxError):
-        relocate_once(old, new)
+        relocate_once(old=old, new=new)
     assert old.exists()   # never copy+unlinked
 
 
@@ -72,4 +72,4 @@ def test_mkdir_failure_is_wrapped_as_credbox_error(
 
     monkeypatch.setattr(Path, "mkdir", _boom)
     with pytest.raises(CredBoxError):
-        relocate_once(old, new)
+        relocate_once(old=old, new=new)

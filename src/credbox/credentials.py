@@ -88,8 +88,8 @@ class Credentials:
         from_env = env_value(name)
         if from_env is not None:
             return Secret(from_env)
-        for store in self._shared:
-            value = self._backend.get(store, name)
+        for shared_app_name in self._shared:
+            value = self._backend.get(shared_app_name, name)
             if value is not None:
                 return value
         return self._backend.get(self._app, name)

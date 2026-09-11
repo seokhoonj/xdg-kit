@@ -133,14 +133,21 @@ def test_set_fails_closed_on_a_keyring_error_and_writes_no_plaintext(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A keyring write error must NOT downgrade to a plaintext file write (which would report
-    # success while the keyring's old value keeps shadowing this write on recovery).
+    # success while the keyring's old value keeps shadowing this write on recovery). And -- the
+    # write path is the WORSE leak case (the helper holds the revealed value and hands it to the
+    # third-party call) -- a keyring error whose own text embeds the secret must not carry it out
+    # on the escaping error's message, args, or __cause__/__context__ chain.
     def boom(service: str, username: str, password: str) -> None:
-        raise RuntimeError("keyring is locked")
+        raise RuntimeError(f"backend failed while storing value {password}")
 
     _install_fake_keyring(monkeypatch, set_=boom)
     fallback = FileBackend()
-    with pytest.raises(CredentialsError):
+    with pytest.raises(CredentialsError) as excinfo:
         KeyringBackend(fallback=fallback).set("app", "name", value=SECRET)
+    err = excinfo.value
+    assert SECRET not in str(err)
+    assert err.__cause__ is None and err.__context__ is None
+    assert not _graph_contains(err, SECRET)
     assert fallback.get("app", "name") is None   # nothing was written to the fallback
 
 

@@ -71,6 +71,25 @@ def test_config_dir_uses_xdg_config_home(
     assert config_dir("myapp") == tmp_path / "cfg" / "myapp"
 
 
+@pytest.mark.parametrize(
+    ("dir_fn", "xdg_var"),
+    [
+        (config_dir, "XDG_CONFIG_HOME"),
+        (data_dir, "XDG_DATA_HOME"),
+        (state_dir, "XDG_STATE_HOME"),
+        (cache_dir, "XDG_CACHE_HOME"),
+    ],
+)
+def test_each_dir_honours_its_own_xdg_base_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dir_fn, xdg_var: str
+) -> None:
+    # Each base function must read ITS OWN XDG_* variable, not a neighbour's -- a cross-wired
+    # table (config reading DATA_HOME, etc.) would pass a single-variable test but leak here.
+    base = tmp_path / xdg_var.lower()
+    monkeypatch.setenv(xdg_var, str(base))
+    assert dir_fn("myapp") == base / "myapp"
+
+
 def test_config_dir_falls_back_to_home_config(tmp_path: Path) -> None:
     assert config_dir("myapp") == tmp_path / ".config" / "myapp"
 

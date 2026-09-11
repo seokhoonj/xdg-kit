@@ -148,6 +148,24 @@ def test_write_body_failure_cleans_up_temp(tmp_path, monkeypatch):
     with pytest.raises(CredBoxError):
         write_bytes_atomic(tmp_path / "f", b"secret-data")
     assert list(tmp_path.glob("*.tmp")) == []
+    assert not (tmp_path / "f").exists()   # a mid-write failure must never rename partial bytes in
+
+
+def test_write_body_failure_leaves_an_existing_target_intact(tmp_path, monkeypatch):
+    # A mid-write failure over an EXISTING file must leave that file's original bytes untouched --
+    # the write goes to a temp and only os.replace swaps it in, so a failure before replace cannot
+    # corrupt or truncate the prior content.
+    target = tmp_path / "f"
+    target.write_bytes(b"original")
+
+    def boom(fd):
+        raise OSError("fsync failed")
+
+    monkeypatch.setattr("credbox.atomic.os.fsync", boom)
+    with pytest.raises(CredBoxError):
+        write_bytes_atomic(target, b"new-secret-data")
+    assert target.read_bytes() == b"original"   # untouched
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_replace_retries_a_transient_permission_error_off_posix(tmp_path, monkeypatch):

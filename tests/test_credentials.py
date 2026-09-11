@@ -31,6 +31,19 @@ def test_env_beats_store(monkeypatch: pytest.MonkeyPatch) -> None:
     assert creds.secret("API_TOKEN").reveal() == "from_env"  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("blank_env", ["", "   ", "\t\n"])
+def test_blank_env_value_falls_through_to_the_store(
+    monkeypatch: pytest.MonkeyPatch, blank_env: str
+) -> None:
+    # A blank/whitespace-only env var must read as ABSENT at the env tier, not override the stored
+    # value with nothing -- the documented "a blank value at any tier is treated as absent" rule,
+    # exercised end-to-end through Credentials (not just env_value in isolation).
+    creds = Credentials("myapp")
+    creds.set("API_TOKEN", value="stored")
+    monkeypatch.setenv("API_TOKEN", blank_env)
+    assert creds.secret("API_TOKEN").reveal() == "stored"  # type: ignore[union-attr]
+
+
 def test_shared_store_consulted_before_own() -> None:
     Credentials("auth").set("shared_key", value="from_auth")
     creds = Credentials("myapp", shared=["auth"])

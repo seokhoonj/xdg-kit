@@ -13,16 +13,16 @@ posix_only = pytest.mark.skipif(os.name != "posix", reason="advisory file locks"
 
 
 def test_single_instance_acquires():
-    with single_instance("nw", "poll") as acquired:
+    with single_instance("nw", name="poll") as acquired:
         assert acquired is True
 
 
 @posix_only
 def test_second_holder_is_refused_while_held():
-    first = FileLock("nw", "poll")
+    first = FileLock("nw", name="poll")
     assert first.acquire() is True
     try:
-        second = FileLock("nw", "poll")
+        second = FileLock("nw", name="poll")
         assert second.acquire() is False   # first still holds it
     finally:
         first.release()
@@ -30,22 +30,52 @@ def test_second_holder_is_refused_while_held():
 
 @posix_only
 def test_lock_is_reusable_after_release():
-    lock = FileLock("nw", "poll")
+    lock = FileLock("nw", name="poll")
     assert lock.acquire() is True
     lock.release()
-    again = FileLock("nw", "poll")
+    again = FileLock("nw", name="poll")
     assert again.acquire() is True
     again.release()
 
 
 def test_context_manager_releases():
-    with FileLock("nw", "poll") as lock:
+    with FileLock("nw", name="poll") as lock:
         assert lock.acquired is True
     assert lock.acquired is False
 
 
+@posix_only
+def test_context_manager_raises_on_contention():
+    # `with FileLock(...)` must NOT run its body when another holder has the lock -- it raises
+    # LockHeldError so protected work never runs unguarded (single_instance is the skip-instead
+    # API). Regression for the old __enter__ that discarded acquire()'s result and entered anyway.
+    from credbox.errors import LockHeldError
+
+    holder = FileLock("nw", name="poll")
+    assert holder.acquire() is True
+    try:
+        with pytest.raises(LockHeldError):
+            with FileLock("nw", name="poll"):
+                pytest.fail("entered the block without the lock")
+    finally:
+        holder.release()
+
+
+def test_double_release_is_a_safe_no_op():
+    # release() on an already-released lock must complete quietly (not re-close a descriptor or
+    # raise), leave `acquired` False, and not prevent a fresh holder from taking the lock.
+    lock = FileLock("nw", name="poll")
+    assert lock.acquire() is True
+    lock.release()
+    lock.release()   # second release: no error, no double-close
+    assert lock.acquired is False
+    again = FileLock("nw", name="poll")
+    assert again.acquire() is True
+    again.release()
+
+
 def test_acquire_is_idempotent_while_held():
-    lock = FileLock("nw", "poll")
+    lock = FileLock("nw", name="poll")
     assert lock.acquire() is True
     assert lock.acquire() is True   # still held, no error
     lock.release()
@@ -53,12 +83,12 @@ def test_acquire_is_idempotent_while_held():
 
 def test_lock_name_traversal_rejected():
     with pytest.raises(InvalidAppNameError):
-        FileLock("nw", "../escape")   # a crafted name must not place the .lock outside runtime_dir
+        FileLock("nw", name="../escape")   # a crafted name must not place the .lock outside runtime_dir
 
 
 def test_lock_bad_app_rejected():
     with pytest.raises(InvalidAppNameError):
-        FileLock("../evil", "poll")
+        FileLock("../evil", name="poll")
 
 
 def test_release_clears_state_even_when_unlock_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,7 +98,7 @@ def test_release_clears_state_even_when_unlock_fails(monkeypatch: pytest.MonkeyP
     # re-taking the lock, silently defeating the single-instance guarantee.
     import credbox.locking as locking
 
-    lock = FileLock("nw", "poll")
+    lock = FileLock("nw", name="poll")
     assert lock.acquire() is True
 
     def _boom(_handle: object) -> None:
@@ -78,6 +108,6 @@ def test_release_clears_state_even_when_unlock_fails(monkeypatch: pytest.MonkeyP
     lock.release()   # must not raise
     assert lock.acquired is False
     # a fresh lock can now genuinely take it (the OS lock was freed by the handle close)
-    other = FileLock("nw", "poll")
+    other = FileLock("nw", name="poll")
     assert other.acquire() is True
     other.release()

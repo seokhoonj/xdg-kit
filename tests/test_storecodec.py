@@ -44,6 +44,11 @@ def test_oversized_integer_literal_returns_not_json_fault_without_escaping() -> 
     blob = ('{"SECRETKEY":' + "7" * 5000 + "}").encode("utf-8")
     result = parse_store(blob)   # must NOT raise
     assert result == StoreFault(StoreFaultKind.NOT_JSON)
+    # Pin the top-level bare literal too (same `except ValueError` clause): a store that is just
+    # the oversized number, no object wrapper, must fold identically -- not raise, not echo digits.
+    top_level = parse_store(("7" * 5000).encode("utf-8"))
+    assert top_level == StoreFault(StoreFaultKind.NOT_JSON)
+    assert "7" * 5000 not in repr(top_level)
 
 
 def test_top_level_non_object_returns_not_object_fault() -> None:
