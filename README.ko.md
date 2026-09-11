@@ -128,8 +128,10 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # 암�
   없을 때만 씁니다. (정리는 *키링 → 파일* 한 방향뿐 — 키링을 못 쓰는 동안 파일에 쓴 값은 키링 복구 후
   자동으로 옮겨지지 않으니, 그때 키를 다시 `set` 하세요.)
 - **암호화 파일** (`[crypto]`) — passphrase의 Argon2id 해시로 키를 만든 단일 AES-GCM 블롭. 폴백 없음: 암호
-  오류·변조는 값 없는 `DecryptionError`로 실패하며 평문으로 물러서지 않습니다. 헤더 전체 인증(AAD), 쓸
-  때마다 새 nonce, 의도적으로 무거운 KDF가 저장소를 열 때마다 ~100ms를 더합니다 — 버그가 아닙니다.
+  오류·변조는 값 없는 `DecryptionError`로 실패하며 평문으로 물러서지 않습니다. 헤더 전체 인증(AAD —
+  암호화하진 않지만 변조 검사에 포함되어, 헤더가 바뀌면 복호화가 실패하는 데이터), 쓸 때마다 새
+  nonce(암호화마다 한 번만 쓰는 난수), 의도적으로 무거운 KDF(key-derivation function — passphrase로
+  키를 만드는 함수, 여기선 Argon2id)가 저장소를 열 때마다 ~100ms를 더합니다 — 버그가 아닙니다.
   **복구 경로가 없습니다**: passphrase를 잃으면 아무도 저장소를 복호화할 수 없으니, passphrase는 따로
   백업하세요.
 
