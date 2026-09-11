@@ -211,8 +211,10 @@ macOS `~/Library/Application Support`, Windows `%LOCALAPPDATA%`), or set `CREDBO
 layout selects **where the store lives**, so switching it points at a different location — it is
 not a migration; move an existing store yourself (e.g. with `relocate_once`) if you change it.
 
-**Windows note:** the 0600/0700 mode bits are POSIX-only. On Windows there is no such mode; credbox
-relies on the per-user `%LOCALAPPDATA%` ACL, and does not claim a mode guarantee it cannot deliver
+**Windows note:** `0600`/`0700` are the POSIX (Linux/macOS) permission bits credbox uses to mark a
+file "owner-only", so no other user on the machine can read it. Windows has no such bits, so
+credbox instead keeps secrets under your per-user `%LOCALAPPDATA%` folder — which Windows already
+restricts to your own account — and does not claim the `0600` guarantee it cannot set directly
 there.
 
 ## 8. Redacting secrets from logs
