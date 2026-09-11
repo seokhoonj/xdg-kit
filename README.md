@@ -140,7 +140,8 @@ Credentials("myapp", backend=encrypted_backend(passphrase=Secret("…"))) # encr
 ```
 
 - **File store** (default, zero-dep) — a `credentials.json` in the app's folder. Works reliably
-  everywhere; stores the value in plaintext at mode 0600.
+  everywhere; stores the value in plaintext at mode `0600` (owner read/write only — a POSIX
+  permission; see the Windows note in §7).
 - **OS keyring** (`[keyring]`) — the OS-provided vault (macOS Keychain, GNOME Keyring, …). When
   reachable it is authoritative, and a successful `set`/`unset` also clears any stale plaintext
   copy from the fallback file. When *absent* (no backend on a server, cron, a container), every
