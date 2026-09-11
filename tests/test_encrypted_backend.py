@@ -196,14 +196,41 @@ def test_unsupported_argon2id_build_fails_closed_content_free(monkeypatch: pytes
         backend.set("myapp", "api_key", value=SECRET)
 
 
+def _secrets_on_traceback(exc: BaseException, *needles: str) -> list[str]:
+    """Every ``frame.local`` on ``exc``'s traceback that contains one of ``needles`` (as a str or
+    within bytes). Used to prove a content-free error kept no passphrase/plaintext in a frame."""
+    found = []
+    tb = exc.__traceback__
+    while tb is not None:
+        for local_name, val in list(tb.tb_frame.f_locals.items()):   # snapshot: locals can mutate
+            text = val if isinstance(val, str) else None
+            raw = bytes(val) if isinstance(val, (bytes, bytearray)) else None
+            for needle in needles:
+                if (text is not None and needle in text) or (raw is not None and needle.encode() in raw):
+                    found.append(f"{tb.tb_frame.f_code.co_name}.{local_name}")
+        tb = tb.tb_next
+    return found
+
+
+def _frame_names(exc: BaseException) -> list[str]:
+    """The function name of every frame on ``exc``'s traceback."""
+    names = []
+    tb = exc.__traceback__
+    while tb is not None:
+        names.append(tb.tb_frame.f_code.co_name)
+        tb = tb.tb_next
+    return names
+
+
 def test_internal_error_at_real_derive_params_fails_closed_content_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The availability probe validates Argon2id at tiny params; a build can still reject the REAL
     # derive params (e.g. no thread support for lanes>1) with InternalError, which _try_decrypt's
-    # catch tuple omits. _derive_key must fold it to a content-free CredentialsError (not
-    # DecryptionError -- it is a build failure, not tampering), never letting it escape with the
-    # passphrase in frame. Simulated: probe passes (real Argon2id), then derive raises InternalError.
+    # catch tuple omits. _derive_key must SIGNAL this by return (never raise), so the escaping
+    # CredentialsError -- content-free, not DecryptionError (a build failure, not tampering) --
+    # carries the passphrase (read) or the plaintext store (write) in NO traceback frame, and has
+    # __cause__/__context__ None. Simulated: probe passes (real Argon2id), then derive raises.
     from cryptography.exceptions import InternalError
 
     import credbox.backends.encrypted as enc
@@ -219,10 +246,32 @@ def test_internal_error_at_real_derive_params_fails_closed_content_free(
 
     monkeypatch.setattr(enc, "Argon2id", _FaultyArgon2id)
     monkeypatch.setattr(enc, "_kdf_available", True)   # skip the probe; exercise the real derive
-    with pytest.raises(CredentialsError) as excinfo:
+
+    # Read path: the passphrase must not survive on any frame of the escaping error.
+    with pytest.raises(CredentialsError) as read_exc:
         _backend().get("myapp", "api_key")
-    assert not isinstance(excinfo.value, DecryptionError)
-    assert PASSPHRASE.reveal() not in str(excinfo.value)
+    assert not isinstance(read_exc.value, DecryptionError)
+    assert PASSPHRASE.reveal() not in str(read_exc.value)
+    assert read_exc.value.__cause__ is None and read_exc.value.__context__ is None
+    leaked = _secrets_on_traceback(read_exc.value, PASSPHRASE.reveal())
+    assert leaked == [], f"passphrase retained on the read-path traceback: {leaked}"
+
+    # Write path: the passphrase must survive on NO frame, and the internal crypto frames
+    # (_encrypt/_derive_key) must be off the traceback entirely because they RETURNED the signal
+    # instead of raising. The plaintext value legitimately lives in the public set()/_save() frames
+    # -- that is the object-level write contract (file.py _save), not a frame-level claim -- so it
+    # is checked only for absence from the error message, not from every frame.
+    with pytest.raises(CredentialsError) as write_exc:
+        _backend().set("myapp", "other", value=SECRET)
+    assert not isinstance(write_exc.value, DecryptionError)
+    assert SECRET not in str(write_exc.value) and PASSPHRASE.reveal() not in str(write_exc.value)
+    assert write_exc.value.__cause__ is None and write_exc.value.__context__ is None
+    leaked = _secrets_on_traceback(write_exc.value, PASSPHRASE.reveal())
+    assert leaked == [], f"passphrase retained on the write-path traceback: {leaked}"
+    frames = _frame_names(write_exc.value)
+    assert "_encrypt" not in frames and "_derive_key" not in frames, (
+        f"a secret-bearing crypto frame is on the write-path traceback: {frames}"
+    )
 
 
 def test_newer_version_blob_reports_upgrade_not_tampering() -> None:
