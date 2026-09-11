@@ -222,7 +222,7 @@ from credbox import single_instance, FileLock
 
 with single_instance("myapp", "poll") as acquired:
     if not acquired:
-        return   # 이미 다른 실행이 잠금을 잡고 있음 — 건너뜁니다
+        return   # 이미 실행 중인 인스턴스가 있음 — 건너뜁니다
     ...
 ```
 
