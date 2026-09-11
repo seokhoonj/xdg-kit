@@ -77,7 +77,7 @@ def _do_get(fields: dict[str, str]) -> None:
     # username/password helper, so this cannot break them.
     if fields.get("protocol") not in _TLS_PROTOCOLS:
         return
-    app = _app_of(fields)
+    app = _derive_app_from_fields(fields)
     if app is None:
         return
     # Read the STORE ONLY (host-scoped) -- NOT Credentials.secret(), whose environment tier is
@@ -103,7 +103,7 @@ def _do_get(fields: dict[str, str]) -> None:
 
 
 def _do_store(fields: dict[str, str]) -> None:
-    app = _app_of(fields)
+    app = _derive_app_from_fields(fields)
     username = fields.get("username")
     password = fields.get("password", "")
     if app is None or not username or not password.strip():
@@ -112,14 +112,14 @@ def _do_store(fields: dict[str, str]) -> None:
 
 
 def _do_erase(fields: dict[str, str]) -> None:
-    app = _app_of(fields)
+    app = _derive_app_from_fields(fields)
     username = fields.get("username")
     if app is None or not username:
         return
     Credentials(app).unset(username)
 
 
-def _app_of(fields: dict[str, str]) -> str | None:
+def _derive_app_from_fields(fields: dict[str, str]) -> str | None:
     """The credbox app for this request, derived from the git ``host``. Returns ``None`` when
     there is no host (so ``get`` yields no credential rather than erroring). A host git sends with
     a port (``example.com:8443``) or as an IPv6 literal (``[::1]``) is not a valid store segment on
