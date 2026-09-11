@@ -156,11 +156,12 @@ git config --global credential.helper credbox
 
 git이 `get`·`store`·`erase`마다 `git-credential-credbox`를 부르고, git `host`를 credbox 앱 이름에,
 `username`을 시크릿 이름에 대응시킵니다. `get`에서 헬퍼는 자격증명 응답만 stdout에 쓰고, 오류가 나면
-아무것도 쓰지 않아(git이 직접 묻습니다) stderr에 값 없는 짧은 안내만 냅니다 — 시크릿도 트레이스백도
-없습니다.
+stdout에는 아무것도 쓰지 않고(git이 직접 묻습니다) stderr에 값 없는 짧은 안내만 냅니다 — 시크릿도
+트레이스백도 없습니다.
 
-저장소는 host로만 키를 잡으므로 평문 `http://` 요청에는 아무것도 제공하지 않습니다(http 저장분과 https
-저장분을 구분할 수 없어, 어느 쪽이든 git에 평문으로 넘기면 다운그레이드가 됩니다). 포트가 붙은 host
+저장소는 호스트 이름만으로 자격증명을 구분하고 프로토콜은 기록하지 않으므로, 평문 `http://` 요청에는
+아무것도 제공하지 않습니다(http 저장분과 https 저장분을 구분할 수 없어, 어느 쪽이든 git에 평문으로
+넘기면 다운그레이드가 됩니다). 포트가 붙은 host
 (`example.com:8443`)나 IPv6 리터럴도 처리합니다. 헬퍼는 OS 키링이 아니라 파일 저장소를 읽습니다.
 
 ## 7. 디렉터리
