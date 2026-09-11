@@ -183,8 +183,11 @@ runtime_dir("myapp")  # $XDG_RUNTIME_DIR/myapp, 없으면 소유자만 접근하
 `%LOCALAPPDATA%`)를 쓰거나 `CREDBOX_LAYOUT`으로 지정합니다. layout은 **저장 위치**를 정하므로, 바꾸면
 다른 위치를 가리킬 뿐 마이그레이션이 아닙니다 — 바꾸려면 기존 저장소를 직접 옮기세요(예: `relocate_once`).
 
-**Windows 참고:** 0600·0700 모드 비트는 POSIX 전용입니다. Windows엔 없어 credbox는 사용자별
-`%LOCALAPPDATA%` ACL에 기대며, 지킬 수 없는 모드를 보장하지 않습니다.
+**Windows 참고:** `0600`·`0700`은 리눅스·macOS(POSIX)에서 파일을 "소유자만 접근"으로 표시하는 권한
+방식으로, credbox가 파일을 이렇게 설정하면 같은 컴퓨터의 다른 사용자가 시크릿 파일을 못 읽습니다.
+Windows엔 이런 권한 비트가 없어, credbox는 대신 시크릿을 사용자별 `%LOCALAPPDATA%` 폴더(Windows가
+이미 그 계정 전용으로 보호하는 폴더)에 저장하며, 거기서 직접 설정할 수 없는 `0600` 보장을 한다고
+주장하지 않습니다.
 
 ## 8. 로그에서 시크릿 마스킹
 
@@ -196,13 +199,14 @@ API가 오류 메시지나 요청 URL에 키를 되비추는 일이 잦아, 손�
 from credbox import scrub_secrets, scrub_exception
 
 scrub_secrets("failed with sk-abc123", [key])   # "failed with ***"
-raise scrub_exception(err, [key])               # __cause__·__context__ 사슬 전체 마스킹
+raise scrub_exception(err, [key])               # 예외 체인 전체(연결된 하위 예외) 마스킹
 ```
 
 두 헬퍼가 받는 시크릿 값은 raw `str`이거나 `Secret`이면 됩니다 — 위 `key`는 `Secret`이고 그대로
-마스킹됩니다. `scrub_exception`은 예외를 내지 않으며, 각 예외의 `args`와 전송 URL(`url`·`request.url`·
-`response.url`), PEP 678 `__notes__`를 다시 씁니다. `__str__`을 따로 정의한 예외라면 만들어진 로그 줄도
-`scrub_secrets`에 한 번 통과시키세요.
+마스킹됩니다. `scrub_exception`은 예외를 내지 않으며, 예외를 처리하다 난 또 다른 예외는 Python이
+`__cause__`·`__context__`로 엮습니다(예외 체인). 시크릿이 그 밑단 예외에 박혀 있을 수 있으므로 **체인
+전체를 따라가** 각 예외의 `args`와 전송 URL(`url`·`request.url`·`response.url`), PEP 678 `__notes__`를
+다시 씁니다. `__str__`을 따로 정의한 예외라면 만들어진 로그 줄도 `scrub_secrets`에 한 번 통과시키세요.
 
 ## 9. 중복 실행 방지 (단일 인스턴스 잠금)
 
@@ -231,7 +235,7 @@ with single_instance("myapp", "poll") as acquired:
 | `config_dir` / `data_dir` / `state_dir` / `cache_dir` / `runtime_dir` | 앱의 XDG 디렉터리. |
 | `default_backend` / `file_backend` / `keyring_backend` / `encrypted_backend` | 백엔드 선택기와 팩토리. |
 | `SecretBackend` / `FileBackend` | 백엔드 프로토콜과 의존성 0 파일 백엔드. |
-| `scrub_secrets` / `scrub_exception` | 텍스트·예외 사슬에서 시크릿 값 마스킹. |
+| `scrub_secrets` / `scrub_exception` | 텍스트와 예외 체인에서 시크릿 값 마스킹. |
 | `single_instance` / `FileLock` | `runtime_dir`의 단일 인스턴스 잠금. |
 | `CredBoxError` / `CredentialsError` / `NoKeyringError` / `InsecureStorageError` / `InvalidAppNameError` / `DecryptionError` / `MissingExtraError` | 예외 계층. |
 | `__version__` | 설치된 패키지 버전 문자열. |
